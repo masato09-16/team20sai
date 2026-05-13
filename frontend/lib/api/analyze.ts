@@ -1,27 +1,25 @@
+import { parseApiErrorResponse } from "@/lib/api/errors";
 import { banshoAnalysisResultSchema, type BanshoAnalysisResult } from "@/lib/api/schemas";
+import { getPublicApiBaseUrl } from "@/lib/env";
 
-function getApiBaseUrl(): string {
-  const base = process.env.NEXT_PUBLIC_API_URL;
-  if (!base) {
-    return "http://127.0.0.1:8000";
-  }
-  return base.replace(/\/$/, "");
-}
-
-export async function analyzeBoardImage(imageBlob: Blob): Promise<BanshoAnalysisResult> {
+export async function analyzeBoardImage(imageBlob: Blob, filename = "board.jpg"): Promise<BanshoAnalysisResult> {
   const form = new FormData();
-  form.append("file", imageBlob, "board.jpg");
+  form.append("file", imageBlob, filename);
 
-  const res = await fetch(`${getApiBaseUrl()}/analyze`, {
+  const res = await fetch(`${getPublicApiBaseUrl()}/analyze`, {
     method: "POST",
     body: form,
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `解析に失敗しました (${res.status})`);
+    const message = await parseApiErrorResponse(res);
+    throw new Error(message);
   }
 
   const json: unknown = await res.json();
-  return banshoAnalysisResultSchema.parse(json);
+  try {
+    return banshoAnalysisResultSchema.parse(json);
+  } catch {
+    throw new Error("サーバーからのデータ形式が想定と異なります。API のバージョンを確認してください。");
+  }
 }

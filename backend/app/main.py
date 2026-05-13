@@ -10,17 +10,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analysis.pipeline import run_bansho_analysis
+from app.cors import cors_middleware_kwargs
 from app.schemas import BanshoAnalysisResult, HealthResponse
 
 app = FastAPI(title="板書上達支援 API", version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, **cors_middleware_kwargs())
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -30,7 +25,8 @@ def health() -> HealthResponse:
 
 @app.post("/analyze", response_model=BanshoAnalysisResult)
 async def analyze(file: Annotated[UploadFile, File(description="板書画像（JPEG/PNG 等）")]) -> BanshoAnalysisResult:
-    if not file.content_type or not file.content_type.startswith("image/"):
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="画像ファイル（image/*）をアップロードしてください")
 
     raw = await file.read()
