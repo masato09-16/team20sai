@@ -1,6 +1,6 @@
 # 板書チェック（板書上達支援 MVP）
 
-黒板・ホワイトボードなどの画像を **アップロード** または **カメラで撮影** し、サーバー側で画像解析します。文字の並びや間隔などに関するフィードバック（スコア・オーバーレイ・改善ヒント）を画面に表示します。
+黒板・ホワイトボードなどの画像を **アップロード** または **カメラで撮影** し、**お手本テキスト**（板書に書いた内容と同じ文字列）と照らし合わせて解析します。OCR は使わず、サーバー側でお手本をチョーク風フォント画像として合成し、写真から抽出した線のマスクとの **形状誤差** からスコアを出します。
 
 ## 構成
 
@@ -16,6 +16,14 @@
 - **API**: VPS・Cloud Run・レンサバ等で `uvicorn` により FastAPI を常駐
 
 フロントは環境変数 **`NEXT_PUBLIC_API_URL`** で API の公開 URL を指します。
+
+### チョーク体フォント（任意）
+
+お手本テキストの描画に **TTF/OTF 等のチョーク体フォント**を使う場合は、ライセンスのあるファイルを手元で用意し、バックエンドの環境変数 **`CHALK_FONT_PATH`** にそのパスを設定してください（リポジトリにはフォントを同梱していません）。詳細は `backend/assets/fonts/README.md` を参照してください。未設定時は Pillow の開発用フォントにフォールバックし、API の `notes` にその旨が含まれます。
+
+### `/analyze` の入力
+
+multipart/form-data で **`file`**（画像）と **`target_text`**（お手本テキスト）が必要です。`target_text` が空の場合は HTTP 400 を返します。
 
 ---
 
@@ -123,6 +131,7 @@ npm run dev
 | 変数 | 必須 | 説明 |
 |------|------|------|
 | `BACKEND_CORS_ORIGINS` | **推奨** | アクセスを許可するブラウザの **Origin** をカンマ区切り（例: `https://my-app.vercel.app,https://www.example.com`）。 |
+| `CHALK_FONT_PATH` | 任意 | お手本描画に使う **TTF/OTF** のパス。未設定時は開発用フォントで描画し、`notes` に記載。 |
 
 - **設定あり**: 指定したオリジンのみ許可、`allow_credentials=true` と組み合わせ可能です。
 - **未設定または空**: 開発のため **全オリジン許可相当** に近くなります（実装上 `allow_credentials` は無効）。**本番では必ず自分のフロントのオリジンを列挙してください。**
@@ -139,7 +148,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-`/health`、非画像の `/analyze`、`/analyze` への空ファイル・破損画像、最小 PNG の成功応答などを確認します。
+`/health`、非画像の `/analyze`、`target_text` 空の `/analyze`、`/analyze` への空ファイル・破損画像、参照比較ロジックの単体テストなどを確認します。
 
 ---
 
@@ -159,8 +168,8 @@ pytest
 ## リポジトリ構成（概要）
 
 ```
-backend/          FastAPI・アプリコード・Dockerfile・tests/
-frontend/       Next.js・Dockerfile・.env.example
+backend/          FastAPI・Dockerfile・tests・assets/fonts/（フォント配置用）
+frontend/         Next.js・Dockerfile・.env.example
 docker-compose.yml  ローカル開発用コンテナ構成
 .env.example       全体メモ・参照用
 ```

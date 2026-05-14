@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analysis.pipeline import run_bansho_analysis
@@ -24,10 +22,20 @@ def health() -> HealthResponse:
 
 
 @app.post("/analyze", response_model=BanshoAnalysisResult)
-async def analyze(file: Annotated[UploadFile, File(description="板書画像（JPEG/PNG 等）")]) -> BanshoAnalysisResult:
+async def analyze(
+    file: UploadFile = File(description="板書画像（JPEG/PNG 等）"),
+    target_text: str = Form(default="", description="比較用のお手本テキスト（改行可）"),
+) -> BanshoAnalysisResult:
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="画像ファイル（image/*）をアップロードしてください")
+
+    text = (target_text or "").strip()
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="お手本テキスト（target_text）を入力してください。板書の内容と同じ文字列を指定してください。",
+        )
 
     raw = await file.read()
     if not raw:
@@ -39,6 +47,6 @@ async def analyze(file: Annotated[UploadFile, File(description="板書画像（J
         raise HTTPException(status_code=400, detail="画像のデコードに失敗しました")
 
     try:
-        return run_bansho_analysis(image)
+        return run_bansho_analysis(image, text)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

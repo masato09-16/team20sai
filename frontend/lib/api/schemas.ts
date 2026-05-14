@@ -36,14 +36,24 @@ const analysisOverlaySchema = z.object({
   guide: gridGuideSchema.nullable(),
 });
 
+const referenceComparisonSchema = z.object({
+  font_similarity: z.number().min(0).max(1),
+  iou: z.number().min(0).max(1),
+  dice_coefficient: z.number().min(0).max(1),
+  pixel_agreement: z.number().min(0).max(1),
+  contour_distance_score: z.number().min(0).max(1),
+});
+
 export const banshoAnalysisResultSchema = z.object({
   scores: analysisScoresSchema,
   overlay: analysisOverlaySchema,
   notes: z.array(z.string()),
   pipeline_stage: z.enum(["stub", "full"]),
+  reference_comparison: referenceComparisonSchema.optional(),
 });
 
 export type BanshoAnalysisResult = z.infer<typeof banshoAnalysisResultSchema>;
 export type AnalysisScores = z.infer<typeof analysisScoresSchema>;
 export type AnalysisOverlay = z.infer<typeof analysisOverlaySchema>;
 export type GridGuide = z.infer<typeof gridGuideSchema>;
+export type ReferenceComparison = z.infer<typeof referenceComparisonSchema>;

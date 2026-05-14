@@ -25,20 +25,25 @@ function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
   return map[key];
 }
 
-function improvementHints(scores: BanshoAnalysisResult["scores"]): string[] {
+function improvementHints(result: BanshoAnalysisResult): string[] {
+  const scores = result.scores;
+  const ref = result.reference_comparison;
   const hints: string[] = [];
   const t = 0.72;
   if (scores.horizontalness < t) {
-    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと水平度が上がります。");
+    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、お手本との一致が上がりやすくなります。");
   }
   if (scores.spacing_uniformity < t) {
-    hints.push("文字同士の間隔をおおむね均等にすると、読みやすさと整列感が出ます。");
+    hints.push("文字同士の間隔をお手本に近づけると、等間隔性の評価が改善します。");
   }
   if (scores.size_consistency < t) {
-    hints.push("文字の高さをそろえると、板書全体の印象がまとまります。");
+    hints.push("文字の高さや太さをお手本に揃えると、サイズ一貫性のスコアが上がります。");
   }
   if (scores.visibility < t) {
     hints.push("コントラスト（背景との差）をはっきりさせ、細すぎる線を避けると視認性が上がります。");
+  }
+  if (ref && ref.font_similarity < 0.55) {
+    hints.push("お手本テキストの形に近づけるようゆっくり書くと、お手本との一致度が上がりやすいです。");
   }
   if (hints.length === 0) {
     hints.push("バランスが良いです。この調子で書き続けましょう。");
@@ -94,6 +99,7 @@ export function CameraCapture() {
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [targetText, setTargetText] = useState("");
 
   const revokePreview = useCallback(() => {
     if (objectUrlRef.current) {
@@ -116,6 +122,7 @@ export function CameraCapture() {
   const resetSession = useCallback(() => {
     setResult(null);
     setError(null);
+    setTargetText("");
     revokePreview();
     stopCamera();
   }, [revokePreview, stopCamera]);
@@ -182,11 +189,16 @@ export function CameraCapture() {
 
   const runAnalysis = useCallback(async () => {
     setError(null);
+    const text = targetText.trim();
+    if (!text) {
+      setError("お手本テキストを入力してください。板書に書いた内容と同じ文字列を指定します。");
+      return;
+    }
 
     try {
       if (selectedFile) {
         setIsAnalyzing(true);
-        const data = await analyzeBoardImage(selectedFile, selectedFile.name);
+        const data = await analyzeBoardImage(selectedFile, text, selectedFile.name);
         setResult(data);
         return;
       }
@@ -210,22 +222,22 @@ export function CameraCapture() {
       if (!blob) {
         throw new Error("画像の変換に失敗しました");
       }
-      const data = await analyzeBoardImage(blob, "capture.jpg");
+      const data = await analyzeBoardImage(blob, text, "capture.jpg");
       setResult(data);
     } catch (e) {
       setError(formatUserError(e));
     } finally {
       setIsAnalyzing(false);
     }
-  }, [selectedFile, streamActive]);
+  }, [selectedFile, streamActive, targetText]);
 
   const { overlay } = result ?? {};
   const w = overlay?.image_width ?? 1;
   const h = overlay?.image_height ?? 1;
   const guide = overlay?.guide ?? null;
 
-  const hasInput = !!(selectedFile || streamActive);
-  const hints = result ? improvementHints(result.scores) : [];
+  const hasInput = !!(selectedFile || streamActive) && targetText.trim().length > 0;
+  const hints = result ? improvementHints(result) : [];
   const summaryPct = result ? Math.round(averageScore(result.scores) * 100) : null;
 
   return (
@@ -233,8 +245,31 @@ export function CameraCapture() {
       <div className="space-y-2 text-center sm:text-left">
         <p className="text-sm leading-relaxed text-zinc-400">
           <span className="sr-only">手順：</span>
-          画像を選ぶかカメラで撮影 →「解析する」→ スコアとオーバーレイで改善点を確認できます。
+          お手本テキストを入力し、画像を選ぶかカメラで撮影してから「解析する」。
+          サーバーがお手本形状と写真の線を比較してスコアを出します（OCR は使いません）。
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="target-text" className="block text-sm font-medium text-zinc-200">
+          お手本テキスト
+        </label>
+        <p className="text-xs text-zinc-500">
+          この文字列をチョーク体のお手本として比較します。板書に書いた内容と同じテキストを入力してください。
+        </p>
+        <textarea
+          id="target-text"
+          value={targetText}
+          onChange={(e) => setTargetText(e.target.value)}
+          rows={3}
+          placeholder={"例：二次方程式の解の公式"}
+          className="w-full resize-y rounded-xl border border-zinc-700 bg-zinc-950/80 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none focus:ring-1 focus:ring-sky-600"
+          disabled={isAnalyzing}
+          autoComplete="off"
+        />
+        {!hasInput && (selectedFile || streamActive) ? (
+          <p className="text-xs text-amber-200/90">画像とお手本テキストの両方を入力してください。</p>
+        ) : null}
       </div>
 
       <input
@@ -414,9 +449,22 @@ export function CameraCapture() {
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
-            各項目は 0〜100% で、高いほど理想に近いとみなしたスタブ指標です（アルゴリム改善により変動します）。
+            水平度・間隔・サイズはお手本テキストから生成した参照形状との比較、視認性は写真のコントラスト等から算出しています（0〜100%）。
           </p>
 
+          {result.reference_comparison && (
+            <div className="rounded-xl border border-sky-900/40 bg-sky-950/20 p-4">
+              <p className="mb-2 text-xs font-medium text-sky-200/90">お手本テキストとの形状一致</p>
+              <p className="font-mono text-2xl tabular-nums text-sky-300">
+                {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
+              </p>
+              <p className="mt-2 text-[11px] text-zinc-500">
+                IoU {(result.reference_comparison.iou * 100).toFixed(0)}% / Dice{" "}
+                {(result.reference_comparison.dice_coefficient * 100).toFixed(0)}% / 画素一致{" "}
+                {(result.reference_comparison.pixel_agreement * 100).toFixed(0)}%
+              </p>
+            </div>
+          )}
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {(Object.keys(result.scores) as (keyof BanshoAnalysisResult["scores"])[]).map((key) => (
               <div

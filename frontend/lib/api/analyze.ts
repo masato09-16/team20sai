@@ -2,9 +2,14 @@ import { parseApiErrorResponse } from "@/lib/api/errors";
 import { banshoAnalysisResultSchema, type BanshoAnalysisResult } from "@/lib/api/schemas";
 import { getPublicApiBaseUrl } from "@/lib/env";
 
-export async function analyzeBoardImage(imageBlob: Blob, filename = "board.jpg"): Promise<BanshoAnalysisResult> {
+export async function analyzeBoardImage(
+  imageBlob: Blob,
+  targetText: string,
+  filename = "board.jpg",
+): Promise<BanshoAnalysisResult> {
   const form = new FormData();
   form.append("file", imageBlob, filename);
+  form.append("target_text", targetText.trim());
 
   const res = await fetch(`${getPublicApiBaseUrl()}/analyze`, {
     method: "POST",

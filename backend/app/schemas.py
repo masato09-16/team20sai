@@ -49,11 +49,22 @@ class AnalysisOverlay(BaseModel):
     guide: GridGuide | None = None
 
 
+class ReferenceComparison(BaseModel):
+    """お手本テキストから生成した参照マスクとの比較（任意フィールド。旧クライアントは無視可）。"""
+
+    font_similarity: float = Field(..., ge=0.0, le=1.0, description="お手本形状との総合一致度")
+    iou: float = Field(..., ge=0.0, le=1.0)
+    dice_coefficient: float = Field(..., ge=0.0, le=1.0)
+    pixel_agreement: float = Field(..., ge=0.0, le=1.0)
+    contour_distance_score: float = Field(..., ge=0.0, le=1.0)
+
+
 class BanshoAnalysisResult(BaseModel):
     scores: AnalysisScores
     overlay: AnalysisOverlay
     notes: list[str] = Field(default_factory=list)
     pipeline_stage: Literal["stub", "full"] = "stub"
+    reference_comparison: ReferenceComparison | None = None
 
 
 class HealthResponse(BaseModel):
