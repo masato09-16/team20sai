@@ -6,10 +6,12 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
+from app.analysis.preview import render_reference_preview_png
 from app.analysis.pipeline import run_bansho_analysis
 from app.cors import cors_middleware_kwargs
-from app.schemas import BanshoAnalysisResult, HealthResponse
+from app.schemas import BanshoAnalysisResult, HealthResponse, ReferencePreviewRequest
 
 app = FastAPI(title="板書上達支援 API", version="0.1.0")
 
@@ -50,3 +52,12 @@ async def analyze(
         return run_bansho_analysis(image, text)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/reference-preview", response_class=Response)
+async def reference_preview(payload: ReferencePreviewRequest) -> Response:
+    try:
+        png = render_reference_preview_png(payload.target_text, payload.width, payload.height)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")

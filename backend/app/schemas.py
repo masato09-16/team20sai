@@ -67,6 +67,12 @@ class BanshoAnalysisResult(BaseModel):
     reference_comparison: ReferenceComparison | None = None
 
 
+class ReferencePreviewRequest(BaseModel):
+    target_text: str = ""
+    width: int = Field(960, ge=320, le=1600)
+    height: int = Field(540, ge=180, le=1200)
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     service: str = "bansho-backend"

@@ -41,6 +41,43 @@ def test_health_ok(client: TestClient) -> None:
     assert data.get("status") == "ok"
 
 
+def test_reference_preview_empty_text_returns_png(client: TestClient) -> None:
+    res = client.post("/reference-preview", json={"target_text": "", "width": 960, "height": 540})
+    assert res.status_code == 200
+    assert res.headers.get("content-type", "").startswith("image/png")
+    assert res.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(res.content) > 2000
+    decoded = cv2.imdecode(np.frombuffer(res.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded.shape[:2] == (540, 960)
+    assert float(np.std(decoded)) > 1.0
+
+
+def test_reference_preview_normal_text_returns_png(client: TestClient) -> None:
+    res = client.post("/reference-preview", json={"target_text": "二次方程式の解の公式", "width": 960, "height": 540})
+    assert res.status_code == 200
+    assert res.headers.get("content-type", "").startswith("image/png")
+    assert res.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(res.content) > 2000
+    decoded = cv2.imdecode(np.frombuffer(res.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded.shape[:2] == (540, 960)
+    assert float(np.std(decoded)) > 2.5
+
+    empty_res = client.post("/reference-preview", json={"target_text": "", "width": 960, "height": 540})
+    empty_decoded = cv2.imdecode(np.frombuffer(empty_res.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert empty_decoded is not None
+    mean_abs_diff = float(np.mean(np.abs(decoded.astype(np.float32) - empty_decoded.astype(np.float32))))
+    assert mean_abs_diff > 0.25
+
+
+def test_reference_preview_out_of_range_returns_422(client: TestClient) -> None:
+    res = client.post("/reference-preview", json={"target_text": "abc", "width": 200, "height": 540})
+    assert res.status_code == 422
+    res2 = client.post("/reference-preview", json={"target_text": "abc", "width": 960, "height": 1400})
+    assert res2.status_code == 422
+
+
 def test_analyze_requires_target_text(client: TestClient) -> None:
     files = {"file": ("t.png", _tiny_png_bytes(), "image/png")}
     res = client.post("/analyze", files=files, data={"target_text": "  "})

@@ -8,9 +8,11 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 
 const nextConfigs = compat.extends("next/core-web-vitals", "next/typescript");
 
-export default [
+const eslintConfig = [
   {
     ignores: [".next/**", "node_modules/**", "out/**", "next-env.d.ts"],
   },
   ...nextConfigs,
 ];
+
+export default eslintConfig;

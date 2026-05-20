@@ -20,6 +20,7 @@
 ### チョーク体フォント（任意）
 
 お手本テキストの描画に **TTF/OTF 等のチョーク体フォント**を使う場合は、ライセンスのあるファイルを手元で用意し、バックエンドの環境変数 **`CHALK_FONT_PATH`** にそのパスを設定してください（リポジトリにはフォントを同梱していません）。詳細は `backend/assets/fonts/README.md` を参照してください。未設定時は Pillow の開発用フォントにフォールバックし、API の `notes` にその旨が含まれます。
+`Chalk-JP.otf` を使う場合は、**各環境で `backend/assets/fonts/Chalk-JP.otf` を配置**してください（Git 管理対象外）。
 
 ### `/analyze` の入力
 
@@ -67,6 +68,7 @@ docker compose logs -f frontend
 
 Compose では次を設定済みです。
 
+- バックエンドに **`CHALK_FONT_PATH=/fonts/Chalk-JP.otf`**（`./backend/assets/fonts` を `/fonts` にマウント）
 - バックエンドに **`BACKEND_CORS_ORIGINS`**（例: `http://localhost:3000`, `http://127.0.0.1:3000`）
 - フロントビルド引数 **`NEXT_PUBLIC_API_URL=http://localhost:8000`**（ブラウザがホスト上の API を参照）
 
@@ -86,6 +88,9 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -r requirements.txt
+
+# チョーク体フォント（任意）
+# set CHALK_FONT_PATH=C:\Users\masat\team20sai\backend\assets\fonts\Chalk-JP.otf
 
 # （任意）CORS を開発用ブラウザ origin に限定する場合
 # set BACKEND_CORS_ORIGINS=http://localhost:3000  （複数はカンマ区切り）

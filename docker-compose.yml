@@ -10,6 +10,7 @@ services:
     environment:
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8000
+      - CHALK_FONT_PATH=/fonts/Chalk-JP.otf
       # ブラウザからのフロント origin（カンマ区切り）。未設定時は開発向けに全許可相当の緩設定。
       - BACKEND_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
       # 任意: ホストのフォントをマウントした場合にパスを指定（例: - ./backend/assets/fonts:/fonts として CHALK_FONT_PATH=/fonts/My.ttf）

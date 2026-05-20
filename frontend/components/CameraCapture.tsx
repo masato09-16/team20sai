@@ -1,6 +1,7 @@
 "use client";
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
+import { fetchReferencePreviewPng } from "@/lib/api/referencePreview";
 import type { BanshoAnalysisResult } from "@/lib/api/schemas";
 import { getPublicApiBaseUrl } from "@/lib/env";
 import {
@@ -92,6 +93,7 @@ export function CameraCapture() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const referencePreviewObjectUrlRef = useRef<string | null>(null);
 
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [streamActive, setStreamActive] = useState(false);
@@ -103,6 +105,9 @@ export function CameraCapture() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [targetText, setTargetText] = useState("");
+  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
+  const [isReferencePreviewLoading, setIsReferencePreviewLoading] = useState(false);
+  const [referencePreviewError, setReferencePreviewError] = useState(false);
   const apiBase = useMemo(() => {
     try {
       return { value: getPublicApiBaseUrl(), configError: null as string | null };
@@ -121,6 +126,14 @@ export function CameraCapture() {
     setSelectedFile(null);
   }, []);
 
+  const revokeReferencePreview = useCallback(() => {
+    if (referencePreviewObjectUrlRef.current) {
+      URL.revokeObjectURL(referencePreviewObjectUrlRef.current);
+      referencePreviewObjectUrlRef.current = null;
+    }
+    setReferencePreviewUrl(null);
+  }, []);
+
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -135,8 +148,9 @@ export function CameraCapture() {
     setError(null);
     setTargetText("");
     revokePreview();
+    revokeReferencePreview();
     stopCamera();
-  }, [revokePreview, stopCamera]);
+  }, [revokePreview, revokeReferencePreview, stopCamera]);
 
   const startCamera = useCallback(async () => {
     setError(null);
@@ -195,8 +209,52 @@ export function CameraCapture() {
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
       }
+      if (referencePreviewObjectUrlRef.current) {
+        URL.revokeObjectURL(referencePreviewObjectUrlRef.current);
+      }
     };
   }, [stopCamera]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      if (apiBase.configError) {
+        revokeReferencePreview();
+        setIsReferencePreviewLoading(false);
+        setReferencePreviewError(true);
+        return;
+      }
+      setIsReferencePreviewLoading(true);
+      setReferencePreviewError(false);
+      try {
+        const blob = await fetchReferencePreviewPng({
+          targetText,
+          width: 960,
+          height: 540,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const url = URL.createObjectURL(blob);
+        if (referencePreviewObjectUrlRef.current) {
+          URL.revokeObjectURL(referencePreviewObjectUrlRef.current);
+        }
+        referencePreviewObjectUrlRef.current = url;
+        setReferencePreviewUrl(url);
+      } catch {
+        if (controller.signal.aborted) return;
+        revokeReferencePreview();
+        setReferencePreviewError(true);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsReferencePreviewLoading(false);
+        }
+      }
+    }, 300);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [apiBase.configError, revokeReferencePreview, targetText]);
 
   const runAnalysis = useCallback(async () => {
     setError(null);
@@ -284,6 +342,29 @@ export function CameraCapture() {
         />
         {!hasInput && (selectedFile || streamActive) ? (
           <p className="text-xs text-amber-200/90">画像とお手本テキストの両方を入力してください。</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-zinc-200">お手本プレビュー</p>
+        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-[rgb(44,82,48)]">
+          {referencePreviewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={referencePreviewUrl} alt="お手本プレビュー" className="h-full w-full object-contain" />
+          ) : (
+            <div className="absolute inset-0 bg-[rgb(44,82,48)]" />
+          )}
+          {isReferencePreviewLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+              <span className="inline-flex items-center gap-2 rounded-full bg-zinc-900/60 px-3 py-1 text-xs text-zinc-100">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                生成中…
+              </span>
+            </div>
+          ) : null}
+        </div>
+        {referencePreviewError ? (
+          <p className="text-xs text-zinc-500">お手本プレビューを作成できませんでした。</p>
         ) : null}
       </div>
 
