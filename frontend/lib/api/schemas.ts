@@ -49,7 +49,7 @@ export const banshoAnalysisResultSchema = z.object({
   overlay: analysisOverlaySchema,
   notes: z.array(z.string()),
   pipeline_stage: z.enum(["stub", "full"]),
-  reference_comparison: referenceComparisonSchema.optional(),
+  reference_comparison: referenceComparisonSchema.nullable().optional(),
 });
 
 export type BanshoAnalysisResult = z.infer<typeof banshoAnalysisResultSchema>;

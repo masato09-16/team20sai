@@ -13,7 +13,7 @@ import {
   Scan,
   Video,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
   const map: Record<keyof BanshoAnalysisResult["scores"], string> = {
@@ -76,6 +76,9 @@ function drawVideoToCanvas(
 }
 
 function formatUserError(e: unknown): string {
+  if (e instanceof Error && /NEXT_PUBLIC_API_URL/.test(e.message)) {
+    return "本番環境の API 設定が未完了です。`NEXT_PUBLIC_API_URL` を設定して再デプロイしてください。";
+  }
   if (e instanceof TypeError && /fetch|network|load failed/i.test(String(e.message))) {
     return "バックエンドに接続できません。`NEXT_PUBLIC_API_URL` と API の起動状態を確認してください。";
   }
@@ -100,6 +103,14 @@ export function CameraCapture() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [targetText, setTargetText] = useState("");
+  const apiBase = useMemo(() => {
+    try {
+      return { value: getPublicApiBaseUrl(), configError: null as string | null };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "NEXT_PUBLIC_API_URL の設定を確認してください。";
+      return { value: "(未設定)", configError: message };
+    }
+  }, []);
 
   const revokePreview = useCallback(() => {
     if (objectUrlRef.current) {
@@ -189,6 +200,10 @@ export function CameraCapture() {
 
   const runAnalysis = useCallback(async () => {
     setError(null);
+    if (apiBase.configError) {
+      setError(formatUserError(new Error(apiBase.configError)));
+      return;
+    }
     const text = targetText.trim();
     if (!text) {
       setError("お手本テキストを入力してください。板書に書いた内容と同じ文字列を指定します。");
@@ -229,7 +244,7 @@ export function CameraCapture() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [selectedFile, streamActive, targetText]);
+  }, [apiBase.configError, selectedFile, streamActive, targetText]);
 
   const { overlay } = result ?? {};
   const w = overlay?.image_width ?? 1;
@@ -425,7 +440,7 @@ export function CameraCapture() {
       </div>
 
       <p className="text-center text-[11px] text-zinc-600 sm:text-left">
-        接続先 API: <span className="font-mono text-zinc-500">{getPublicApiBaseUrl()}</span>
+        接続先 API: <span className="font-mono text-zinc-500">{apiBase.value}</span>
       </p>
 
       {permissionDenied && (
@@ -449,7 +464,7 @@ export function CameraCapture() {
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
-            水平度・間隔・サイズはお手本テキストから生成した参照形状との比較、視認性は写真のコントラスト等から算出しています（0〜100%）。
+            水平度・間隔・サイズは写真の実レイアウトを主に評価し、参照形状との比較を補助的に反映しています。視認性は写真のコントラスト等から算出します（0〜100%）。
           </p>
 
           {result.reference_comparison && (

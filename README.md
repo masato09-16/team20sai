@@ -114,6 +114,13 @@ npm run dev
 
 ブラウザ: http://localhost:3000（既定ポート）。
 
+品質チェック:
+
+```bash
+npm run lint   # ESLint CLI
+npm run build
+```
+
 ---
 
 ## 本番公開時に使う環境変数
@@ -124,7 +131,7 @@ npm run dev
 |------|------|------|
 | `NEXT_PUBLIC_API_URL` | **推奨** | ブラウザが呼び出す API のベース URL（末尾スラッシュなし）。**ビルド時**に静的に埋め込まれます（Vercel では Project Settings の Environment Variables に設定）。 |
 
-未設定時のフォールバックはローカル向けに `http://127.0.0.1:8000` です。**本番では必ず自分の API URL に設定してください。**
+`NEXT_PUBLIC_API_URL` の未設定フォールバック（`http://127.0.0.1:8000`）は **開発時のみ** 利用されます。**本番環境で未設定の場合はエラーとして検出** されるため、必ず API の公開 URL を設定してください。
 
 ### バックエンド（FastAPI）
 

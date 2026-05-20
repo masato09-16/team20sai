@@ -11,3 +11,5 @@ set CHALK_FONT_PATH=C:\path\to\YourChalkFont.ttf
 ```
 
 `CHALK_FONT_PATH` が未設定、またはファイルが存在しない場合は **Pillow のビルトインフォント**にフォールバックし、レスポンスの `notes` に「チョーク体フォント未設定」と表示されます（形状比較の参考値として利用してください）。
+
+`docker-compose.yml` でも `CHALK_FONT_PATH` はデフォルト未設定です。必要な場合のみコメント例を有効化してください。

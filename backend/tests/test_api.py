@@ -104,15 +104,26 @@ def test_analyze_synthetic_mismatch_lower_than_match(client: TestClient) -> None
 
 
 def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient) -> None:
-    """従来の合成（多矩形）でも target_text を付与すれば 200。"""
+    """密と疎で、レイアウト関連スコアに差が出る。"""
     dense = _encode_png_bgr(_synthetic_dense_board())
     sparse = _encode_png_bgr(_synthetic_sparse_board())
     rd = _post_analyze(client, dense, "abcdefghijklmnopqr").json()
     rs = _post_analyze(client, sparse, "abcdefghijklmnopqr").json()
     assert rd.get("pipeline_stage") == "full" and rs.get("pipeline_stage") == "full"
-    score_keys = ["horizontalness", "spacing_uniformity", "size_consistency", "visibility"]
+    score_keys = ["horizontalness", "spacing_uniformity", "size_consistency"]
     diffs = [abs(rd["scores"][k] - rs["scores"][k]) for k in score_keys]
     assert max(diffs) >= 0.02
+    assert rd["scores"]["spacing_uniformity"] > rs["scores"]["spacing_uniformity"]
+
+
+def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient) -> None:
+    """不揃いの文字サイズ・行ゆれがある画像ではサイズ一貫性が下がる。"""
+    neat = _encode_png_bgr(_synthetic_dense_board())
+    irregular = _encode_png_bgr(_synthetic_irregular_board())
+    rn = _post_analyze(client, neat, "abcdefghijklmnopqr").json()
+    ri = _post_analyze(client, irregular, "abcdefghijklmnopqr").json()
+    assert rn.get("pipeline_stage") == "full" and ri.get("pipeline_stage") == "full"
+    assert rn["scores"]["size_consistency"] > ri["scores"]["size_consistency"] + 0.05
 
 
 def _synthetic_dense_board() -> np.ndarray:
@@ -129,4 +140,24 @@ def _synthetic_dense_board() -> np.ndarray:
 def _synthetic_sparse_board() -> np.ndarray:
     img = np.ones((384, 560, 3), dtype=np.uint8) * 250
     cv2.rectangle(img, (200, 180), (216, 226), (55, 55, 55), thickness=-1)
+    return img
+
+
+def _synthetic_irregular_board() -> np.ndarray:
+    h, w = 384, 560
+    img = np.ones((h, w, 3), dtype=np.uint8) * 252
+    for row in range(4):
+        y_base = 64 + row * 72
+        for col in range(12):
+            x0 = 34 + col * 40 + (col % 3) * 3
+            rect_h = 24 + ((row + col) % 4) * 9
+            rect_w = 10 + ((2 * row + col) % 5) * 5
+            jitter_y = (col % 2) * 5
+            cv2.rectangle(
+                img,
+                (x0, y_base + jitter_y),
+                (x0 + rect_w, y_base + jitter_y + rect_h),
+                (35, 35, 35),
+                thickness=-1,
+            )
     return img

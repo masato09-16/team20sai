@@ -7,6 +7,11 @@ export const FALLBACK_LOCAL_API_URL = "http://127.0.0.1:8000";
 export function getPublicApiBaseUrl(): string {
   const base = process.env.NEXT_PUBLIC_API_URL;
   if (!base?.trim()) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "NEXT_PUBLIC_API_URL が未設定です。本番環境では API の公開 URL を NEXT_PUBLIC_API_URL に設定してください。",
+      );
+    }
     return FALLBACK_LOCAL_API_URL;
   }
   return base.trim().replace(/\/$/, "");

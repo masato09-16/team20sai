@@ -105,7 +105,7 @@ def compare_reference_masks(
 
     ar = float(np.count_nonzero(crop_r > 127))
     au = float(np.count_nonzero(crop_u > 127))
-    area_ratio = min(ar, au) / max(ar, 1.0)
+    area_ratio = min(ar, au) / max(ar, au, 1.0)
     size_consistency = _clamp01(float(np.sqrt(area_ratio)))
 
     r = _letterbox_binary(crop_r, align_size)

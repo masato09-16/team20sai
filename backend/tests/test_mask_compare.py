@@ -21,3 +21,16 @@ def test_compare_nonempty_vs_empty_low_score() -> None:
     out = compare_reference_masks(ref, empty)
     assert out.reference_comparison.font_similarity < 0.2
     assert out.reference_comparison.iou == 0.0
+
+
+def test_size_consistency_penalizes_when_upload_is_too_large() -> None:
+    """参照よりアップロードが大きすぎる場合もサイズ一貫性を減点する。"""
+    ref = np.zeros((220, 260), dtype=np.uint8)
+    up = np.zeros((220, 260), dtype=np.uint8)
+    ref[80:120, 90:150] = 255  # 40x60
+    up[60:160, 60:200] = 255  # 100x140
+
+    out_big_upload = compare_reference_masks(ref, up)
+    out_equal = compare_reference_masks(ref, ref)
+
+    assert out_big_upload.layout.size_consistency < out_equal.layout.size_consistency - 0.05

@@ -17,6 +17,17 @@ from app.analysis.reference import render_reference_mask
 from app.schemas import AnalysisOverlay, AnalysisScores, BoundingBox, BanshoAnalysisResult, GridGuide, Point2D
 
 
+def _clamp01(x: float) -> float:
+    return float(np.clip(x, 0.0, 1.0))
+
+
+def _blend_layout_score(metric_score: float, ref_score: float, ref_weight: float = 0.18) -> float:
+    """実画像レイアウトを主とし、参照比較を補助的にブレンドする。"""
+    rw = float(np.clip(ref_weight, 0.0, 0.4))
+    mw = 1.0 - rw
+    return _clamp01(mw * float(metric_score) + rw * float(ref_score))
+
+
 def _resize_work_bgr(bgr: np.ndarray, max_edge: int = 1600) -> tuple[np.ndarray, float, tuple[int, int]]:
     """解析用縮小。戻り: (縮小 BGR, スケール=元/処理後の次元比, (元の高さ,元の幅))"""
     ho, wo = bgr.shape[:2]
@@ -88,7 +99,7 @@ def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAna
     fg_ratio_work = float(np.count_nonzero(mask_work > 127) / float(hn * wn))
 
     if not perspective.corners_detected:
-        merged_notes.append("四隅の自動検出は未対応です。なるべく正面から矩形に収めて撮影すると解析が安定しやすいです。")
+        merged_notes.append("四隅の自動検出が安定せず、元画像のまま解析しました。なるべく正面から矩形に収めて撮影すると安定しやすいです。")
 
     if scale_factor > 1.001:
         merged_notes.append("画像を解析用に縮小して処理しました（詳細検出への影響は軽いです）。")
@@ -129,9 +140,9 @@ def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAna
     merged_notes.extend(metrics.metric_notes)
 
     scores = AnalysisScores(
-        horizontalness=float(cmp.layout.horizontalness),
-        spacing_uniformity=float(cmp.layout.spacing_uniformity),
-        size_consistency=float(cmp.layout.size_consistency),
+        horizontalness=_blend_layout_score(metrics.scores.horizontalness, cmp.layout.horizontalness),
+        spacing_uniformity=_blend_layout_score(metrics.scores.spacing_uniformity, cmp.layout.spacing_uniformity),
+        size_consistency=_blend_layout_score(metrics.scores.size_consistency, cmp.layout.size_consistency),
         visibility=float(metrics.scores.visibility),
     )
 
