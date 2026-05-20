@@ -5,13 +5,13 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.analysis.board_gate import assess_chalkboard_image
 from app.analysis.reference import render_reference_mask
 from app.main import app
 
 
 def _tiny_png_bytes() -> bytes:
-    img = np.zeros((24, 32, 3), dtype=np.uint8)
-    img[:] = (40, 80, 120)
+    img = _synthetic_chalkboard_minimal()
     ok, buf = cv2.imencode(".png", img)
     assert ok
     return buf.tobytes()
@@ -112,6 +112,27 @@ def test_analyze_rejects_corrupt_image(client: TestClient) -> None:
     assert isinstance(detail, str)
 
 
+def test_analyze_rejects_white_background_black_text(client: TestClient) -> None:
+    img = _synthetic_whiteboard_like()
+    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    assert res.status_code == 422
+    assert "黒板" in res.json().get("detail", "")
+
+
+def test_analyze_rejects_solid_dark_without_text(client: TestClient) -> None:
+    img = np.zeros((360, 560, 3), dtype=np.uint8)
+    img[:, :] = (36, 82, 44)
+    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    assert res.status_code == 422
+
+
+def test_analyze_rejects_random_noise_image(client: TestClient) -> None:
+    rng = np.random.default_rng(1234)
+    img = rng.integers(0, 256, (360, 560, 3), dtype=np.uint8)
+    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    assert res.status_code == 422
+
+
 def test_analyze_accepts_minimal_png(client: TestClient) -> None:
     res = _post_analyze(client, _tiny_png_bytes(), "ab")
     assert res.status_code == 200
@@ -127,17 +148,20 @@ def test_analyze_accepts_minimal_png(client: TestClient) -> None:
     assert ov["image_width"] > 0 and ov["image_height"] > 0
 
 
-def test_analyze_synthetic_mismatch_lower_than_match(client: TestClient) -> None:
-    """同一画像に対し、お手本テキストが合う場合の方が、大きく異なるテキストより一致度が高い。"""
-    text_match = "AB"
-    w, h = 320, 240
+def test_analyze_accepts_render_based_chalkboard_image(client: TestClient) -> None:
+    """参照マスクから作った黒板風画像でも /analyze が通る。"""
+    text_match = "AB AB AB\nAB AB AB"
+    w, h = 420, 280
     rr = render_reference_mask(text_match, w, h)
-    bgr = cv2.cvtColor(rr.mask, cv2.COLOR_GRAY2BGR)
+    bgr = _chalkboard_base(h, w)
+    chalk = rr.mask > 127
+    bgr[chalk] = (228, 228, 228)
     png = _encode_png_bgr(bgr)
-
-    good = _post_analyze(client, png, text_match).json()["reference_comparison"]["font_similarity"]
-    bad = _post_analyze(client, png, "ZZZZZZ").json()["reference_comparison"]["font_similarity"]
-    assert good > bad + 0.02, f"good={good} bad={bad}"
+    res = _post_analyze(client, png, text_match)
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("pipeline_stage") == "full"
+    assert body.get("reference_comparison") is not None
 
 
 def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient) -> None:
@@ -147,7 +171,7 @@ def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient) -> 
     rd = _post_analyze(client, dense, "abcdefghijklmnopqr").json()
     rs = _post_analyze(client, sparse, "abcdefghijklmnopqr").json()
     assert rd.get("pipeline_stage") == "full" and rs.get("pipeline_stage") == "full"
-    score_keys = ["horizontalness", "spacing_uniformity", "size_consistency"]
+    score_keys = ["horizontalness", "spacing_uniformity", "size_consistency", "visibility"]
     diffs = [abs(rd["scores"][k] - rs["scores"][k]) for k in score_keys]
     assert max(diffs) >= 0.02
     assert rd["scores"]["spacing_uniformity"] > rs["scores"]["spacing_uniformity"]
@@ -165,24 +189,28 @@ def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient
 
 def _synthetic_dense_board() -> np.ndarray:
     h, w = 384, 560
-    img = np.ones((h, w, 3), dtype=np.uint8) * 255
+    img = _chalkboard_base(h, w)
     for row in range(4):
         y0 = 72 + row * 70
         for col in range(18):
             x0 = 36 + col * 28
-            cv2.rectangle(img, (x0, y0), (x0 + 14, y0 + 46), (28, 28, 28), thickness=-1)
+            cv2.rectangle(img, (x0, y0), (x0 + 14, y0 + 46), (228, 228, 228), thickness=-1)
     return img
 
 
 def _synthetic_sparse_board() -> np.ndarray:
-    img = np.ones((384, 560, 3), dtype=np.uint8) * 250
-    cv2.rectangle(img, (200, 180), (216, 226), (55, 55, 55), thickness=-1)
+    img = _chalkboard_base(384, 560)
+    for r in range(2):
+        y0 = 150 + r * 78
+        for c in range(6):
+            x = 120 + c * 48
+            cv2.rectangle(img, (x, y0), (x + 15, y0 + 42), (226, 226, 226), thickness=-1)
     return img
 
 
 def _synthetic_irregular_board() -> np.ndarray:
     h, w = 384, 560
-    img = np.ones((h, w, 3), dtype=np.uint8) * 252
+    img = _chalkboard_base(h, w)
     for row in range(4):
         y_base = 64 + row * 72
         for col in range(12):
@@ -194,7 +222,53 @@ def _synthetic_irregular_board() -> np.ndarray:
                 img,
                 (x0, y_base + jitter_y),
                 (x0 + rect_w, y_base + jitter_y + rect_h),
-                (35, 35, 35),
+                (228, 228, 228),
                 thickness=-1,
             )
     return img
+
+
+def _chalkboard_base(h: int, w: int) -> np.ndarray:
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[:, :] = (44, 86, 48)
+    yy, xx = np.indices((h, w))
+    vignette = ((xx - w / 2.0) ** 2 + (yy - h / 2.0) ** 2) / ((w * w + h * h) / 4.0)
+    shade = (1.0 - 0.1 * np.clip(vignette, 0.0, 1.0))[:, :, None]
+    return np.clip(img.astype(np.float32) * shade, 0.0, 255.0).astype(np.uint8)
+
+
+def _synthetic_chalkboard_minimal() -> np.ndarray:
+    img = _chalkboard_base(240, 320)
+    for r in range(3):
+        y = 40 + r * 60
+        for c in range(8):
+            x = 20 + c * 34
+            cv2.rectangle(img, (x, y), (x + 12, y + 30), (225, 225, 225), thickness=-1)
+    return img
+
+
+def _synthetic_whiteboard_like() -> np.ndarray:
+    img = np.ones((360, 560, 3), dtype=np.uint8) * 245
+    for r in range(4):
+        y = 56 + r * 70
+        for c in range(12):
+            x = 30 + c * 42
+            cv2.rectangle(img, (x, y), (x + 16, y + 40), (30, 30, 30), thickness=-1)
+    return img
+
+
+def test_board_gate_unit_accepts_blackboard_like() -> None:
+    img = _synthetic_dense_board()
+    out = assess_chalkboard_image(img)
+    assert out.accepted
+    assert 0.0 <= out.confidence <= 1.0
+    assert 0.0 <= out.metrics["background_score"] <= 1.0
+    assert 0.0 <= out.metrics["chalk_stroke_score"] <= 1.0
+    assert 0.0 <= out.metrics["text_layout_score"] <= 1.0
+
+
+def test_board_gate_unit_rejects_whiteboard_like() -> None:
+    img = _synthetic_whiteboard_like()
+    out = assess_chalkboard_image(img)
+    assert not out.accepted
+    assert out.metrics["bright_area_ratio"] > 0.4

@@ -8,6 +8,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from app.analysis.board_gate import assess_chalkboard_image
 from app.analysis.preview import render_reference_preview_png
 from app.analysis.pipeline import run_bansho_analysis
 from app.cors import cors_middleware_kwargs
@@ -47,6 +48,13 @@ async def analyze(
     image = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(status_code=400, detail="画像のデコードに失敗しました")
+
+    gate = assess_chalkboard_image(image)
+    if not gate.accepted:
+        raise HTTPException(
+            status_code=422,
+            detail="黒板とチョーク文字が写った画像として判定できませんでした。黒板全体を正面から撮影した画像を選んでください。",
+        )
 
     try:
         return run_bansho_analysis(image, text)
