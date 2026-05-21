@@ -1,6 +1,7 @@
 # 板書チェック（板書上達支援 MVP）
 
-黒板・ホワイトボードなどの画像を **アップロード** または **カメラで撮影** し、**お手本テキスト**（板書に書いた内容と同じ文字列）と照らし合わせて解析します。OCR は使わず、サーバー側でお手本をチョーク風フォント画像として合成し、写真から抽出した線のマスクとの **形状誤差** からスコアを出します。
+黒板画像を **アップロード** または **カメラで撮影** して解析します。解析は OCR で画像内文字を推定し、チョーク体参照との **形状誤差** とレイアウトを評価します。
+お手本テキストは練習用プレビュー専用で、解析スコア計算には使いません。
 
 ## 構成
 
@@ -24,7 +25,13 @@
 
 ### `/analyze` の入力
 
-multipart/form-data で **`file`**（画像）と **`target_text`**（お手本テキスト）が必要です。`target_text` が空の場合は HTTP 400 を返します。
+multipart/form-data で **`file`**（画像）のみ必須です。`target_text` は解析に使いません。
+解析前に入力ゲートと台形補正を共通前処理として実施したあと、OCR で推定した文字を使って比較します。
+OCR 結果を修正して再解析する場合は、任意の **`corrected_text`** を送ると OCR をスキップし、その文字列を使って比較します。
+
+### `/reference-preview` の入力
+
+JSON で **`target_text`** を受け取り、練習用の黒板プレビュー PNG を返します。こちらは解析とは独立した機能です。
 
 ---
 
@@ -69,8 +76,12 @@ docker compose logs -f frontend
 Compose では次を設定済みです。
 
 - バックエンドに **`CHALK_FONT_PATH=/fonts/Chalk-JP.otf`**（`./backend/assets/fonts` を `/fonts` にマウント）
+- バックエンドに **OCR 依存関係（`requirements-ocr.txt`）** をインストール
+- EasyOCR のモデル保存先として **`/root/.EasyOCR`** を使い、named volume **`easyocr-cache`** にキャッシュ
 - バックエンドに **`BACKEND_CORS_ORIGINS`**（例: `http://localhost:3000`, `http://127.0.0.1:3000`）
 - フロントビルド引数 **`NEXT_PUBLIC_API_URL=http://localhost:8000`**（ブラウザがホスト上の API を参照）
+
+初回 OCR 実行時は EasyOCR のモデル取得が走ることがあります。ネットワーク制限がある環境では、事前にモデルを用意するか、モデル取得が可能な状態で一度実行してください。
 
 ---
 
@@ -88,6 +99,9 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -r requirements.txt
+
+# OCR 解析を有効にする場合（任意）
+# pip install -r requirements-ocr.txt
 
 # チョーク体フォント（任意）
 # set CHALK_FONT_PATH=C:\Users\masat\team20sai\backend\assets\fonts\Chalk-JP.otf
@@ -160,7 +174,19 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-`/health`、非画像の `/analyze`、`target_text` 空の `/analyze`、`/analyze` への空ファイル・破損画像、参照比較ロジックの単体テストなどを確認します。
+`/health`、非画像の `/analyze`、OCR 未設定時の `/analyze`、`/analyze` への空ファイル・破損画像、参照比較ロジックの単体テストなどを確認します。
+
+## OCR について（任意）
+
+- 通常セットアップは `pip install -r requirements.txt` です。
+- OCR 解析を使う場合は `pip install -r requirements-ocr.txt` を追加で実行してください。
+- Docker Compose では `requirements-ocr.txt` までインストールするため、コンテナ内でも OCR 解析を利用できます。
+- OCR は optional 機能です。OCR 未導入でも API 起動と `/reference-preview` は利用できます。
+- `/analyze` は通常 OCR モードです。`corrected_text` 指定時は手動修正モードで再解析します。
+- OCR 未導入・初期化失敗時は 422 が返ります。
+- OCR 実行中エラーや認識文字なし、低信頼度でも 422 を返し、ユーザー向けメッセージを返します。
+- 初回 OCR 実行時はモデル取得が走る可能性があります。オフライン/制限環境では事前モデル配置やネットワーク許可が必要です。
+- OCR 実装は lazy import + 分離構造で、将来的なエンジン差し替えを想定しています。
 
 ---
 

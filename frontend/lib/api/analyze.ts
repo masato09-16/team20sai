@@ -4,12 +4,15 @@ import { getPublicApiBaseUrl } from "@/lib/env";
 
 export async function analyzeBoardImage(
   imageBlob: Blob,
-  targetText: string,
   filename = "board.jpg",
+  correctedText?: string,
 ): Promise<BanshoAnalysisResult> {
   const form = new FormData();
   form.append("file", imageBlob, filename);
-  form.append("target_text", targetText.trim());
+  const trimmedCorrection = correctedText?.trim();
+  if (trimmedCorrection) {
+    form.append("corrected_text", trimmedCorrection);
+  }
 
   const res = await fetch(`${getPublicApiBaseUrl()}/analyze`, {
     method: "POST",

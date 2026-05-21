@@ -50,6 +50,11 @@ export const banshoAnalysisResultSchema = z.object({
   notes: z.array(z.string()),
   pipeline_stage: z.enum(["stub", "full"]),
   reference_comparison: referenceComparisonSchema.nullable().optional(),
+  mode: z.enum(["reference", "ocr", "manual"]).default("ocr"),
+  recognized_text: z.string().nullable().optional(),
+  ocr_confidence: z.number().min(0).max(1).nullable().optional(),
+  ocr_engine: z.string().nullable().optional(),
+  perspective_corrected: z.boolean().default(false),
 });
 
 export type BanshoAnalysisResult = z.infer<typeof banshoAnalysisResultSchema>;

@@ -1,10 +1,8 @@
-"""板書画像の解析パイプライン。
-
-お手本テキストから Pillow で参照マスクを生成し、アップロード画像のストロークマスクと
-位置合わせした誤差からスコアを算出する（OCR なし）。
-"""
+"""板書画像の解析パイプライン（reference / ocr 両モード）。"""
 
 from __future__ import annotations
+
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -12,9 +10,11 @@ import numpy as np
 from app.analysis.binarize import extract_chalk_mask
 from app.analysis.mask_compare import compare_reference_masks
 from app.analysis.metrics import compute_metrics, default_guide
-from app.analysis.perspective import apply_perspective_correction
+from app.analysis.ocr import OCRResult, recognize_board_text
 from app.analysis.reference import render_reference_mask
 from app.schemas import AnalysisOverlay, AnalysisScores, BoundingBox, BanshoAnalysisResult, GridGuide, Point2D
+
+AnalysisMode = Literal["reference", "ocr", "manual"]
 
 
 def _clamp01(x: float) -> float:
@@ -75,15 +75,16 @@ def _scale_metrics_to_original(
     return baselines, boxes, scaled_guide
 
 
-def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAnalysisResult:
-    """BGR uint8 とお手本テキストを受け取り解析結果を返す。"""
-    merged_notes: list[str] = [
-        "文字認識（OCR）は行っておらず、入力いただいたお手本テキストから生成した参照形状と、"
-        "写真から抽出した線のマスクを比較してスコアを算出しています。"
-    ]
-
-    perspective = apply_perspective_correction(image_bgr_u8)
-    bgr_orig = perspective.warped_bgr
+def _run_with_reference_text(
+    bgr_orig: np.ndarray,
+    target_text: str,
+    merged_notes: list[str],
+    mode: AnalysisMode,
+    perspective_corrected: bool,
+    recognized_text: str | None = None,
+    ocr_confidence: float | None = None,
+    ocr_engine: str | None = None,
+) -> BanshoAnalysisResult:
     ho, wo = bgr_orig.shape[:2]
 
     bgr_work, scale_factor, (ho_keep, wo_keep) = _resize_work_bgr(bgr_orig, max_edge=1600)
@@ -97,9 +98,6 @@ def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAna
     mask_work = binarize_out.mask
 
     fg_ratio_work = float(np.count_nonzero(mask_work > 127) / float(hn * wn))
-
-    if not perspective.corners_detected:
-        merged_notes.append("四隅の自動検出が安定せず、元画像のまま解析しました。なるべく正面から矩形に収めて撮影すると安定しやすいです。")
 
     if scale_factor > 1.001:
         merged_notes.append("画像を解析用に縮小して処理しました（詳細検出への影響は軽いです）。")
@@ -135,6 +133,11 @@ def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAna
             notes=merged_notes,
             pipeline_stage="full",
             reference_comparison=cmp.reference_comparison,
+            mode=mode,
+            recognized_text=recognized_text,
+            ocr_confidence=ocr_confidence,
+            ocr_engine=ocr_engine,
+            perspective_corrected=perspective_corrected,
         )
 
     merged_notes.extend(metrics.metric_notes)
@@ -170,4 +173,100 @@ def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAna
         notes=merged_notes,
         pipeline_stage="full",
         reference_comparison=cmp.reference_comparison,
+        mode=mode,
+        recognized_text=recognized_text,
+        ocr_confidence=ocr_confidence,
+        ocr_engine=ocr_engine,
+        perspective_corrected=perspective_corrected,
     )
+
+
+def run_reference_analysis(
+    image_bgr_u8: np.ndarray,
+    target_text: str,
+    pre_notes: list[str] | None = None,
+    perspective_corrected: bool = False,
+) -> BanshoAnalysisResult:
+    merged_notes: list[str] = list(pre_notes or [])
+    merged_notes.append(
+        "入力いただいたお手本テキストから生成した参照形状と、写真から抽出した線のマスクを比較してスコアを算出しています。"
+    )
+    return _run_with_reference_text(
+        image_bgr_u8,
+        target_text,
+        merged_notes=merged_notes,
+        mode="reference",
+        perspective_corrected=perspective_corrected,
+    )
+
+
+def run_ocr_analysis(
+    image_bgr_u8: np.ndarray,
+    pre_notes: list[str] | None = None,
+    perspective_corrected: bool = False,
+) -> BanshoAnalysisResult:
+    merged_notes: list[str] = list(pre_notes or [])
+    merged_notes.append("OCR により認識した文字をチョーク体で再描画し、写真の線形状と比較しています。")
+    try:
+        ocr = recognize_board_text(image_bgr_u8)
+    except Exception as exc:  # 念のため OCR 実行時の例外を 422 へ寄せる
+        raise ValueError("OCR 実行中にエラーが発生しました。しばらくしてから再度お試しください。") from exc
+    merged_notes.extend(ocr.notes)
+
+    def _ocr_error_message(out: OCRResult) -> str:
+        if out.error_code == "ocr_unavailable":
+            return "OCR エンジンが未設定です。OCR 依存関係をインストールしてから解析してください。"
+        if out.error_code == "ocr_init_failed":
+            return "OCR エンジンの初期化に失敗しました。環境設定を確認してください。"
+        if out.error_code == "ocr_runtime_failed":
+            return "OCR 実行中にエラーが発生しました。しばらくしてから再度お試しください。"
+        return out.error_message or "OCR 処理に失敗しました。"
+
+    if not ocr.available:
+        raise ValueError(_ocr_error_message(ocr))
+    if ocr.error_code in {"ocr_init_failed", "ocr_runtime_failed"}:
+        raise ValueError(_ocr_error_message(ocr))
+    if not ocr.text.strip():
+        raise ValueError("文字を認識できませんでした。黒板全体を明るく、正面から撮影してください。")
+    if ocr.confidence < 0.35:
+        merged_notes.append("OCR の信頼度がかなり低いため、認識文字を確認し、違う場合は修正して再解析してください。")
+
+    return _run_with_reference_text(
+        image_bgr_u8,
+        ocr.text,
+        merged_notes=merged_notes,
+        mode="ocr",
+        perspective_corrected=perspective_corrected,
+        recognized_text=ocr.text,
+        ocr_confidence=float(ocr.confidence),
+        ocr_engine=ocr.engine,
+    )
+
+
+def run_manual_text_analysis(
+    image_bgr_u8: np.ndarray,
+    corrected_text: str,
+    pre_notes: list[str] | None = None,
+    perspective_corrected: bool = False,
+) -> BanshoAnalysisResult:
+    text = corrected_text.strip()
+    if not text:
+        raise ValueError("修正後の文字列を入力してください。")
+
+    merged_notes: list[str] = list(pre_notes or [])
+    merged_notes.append("ユーザーが修正した文字列をチョーク体で再描画し、写真の線形状と比較しています。")
+    return _run_with_reference_text(
+        image_bgr_u8,
+        text,
+        merged_notes=merged_notes,
+        mode="manual",
+        perspective_corrected=perspective_corrected,
+        recognized_text=text,
+        ocr_confidence=None,
+        ocr_engine="manual",
+    )
+
+
+def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAnalysisResult:
+    """後方互換: target_text を使う reference モード。"""
+    return run_reference_analysis(image_bgr_u8, target_text, pre_notes=None, perspective_corrected=False)

@@ -65,6 +65,11 @@ class BanshoAnalysisResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
     pipeline_stage: Literal["stub", "full"] = "stub"
     reference_comparison: ReferenceComparison | None = None
+    mode: Literal["reference", "ocr", "manual"] = "ocr"
+    recognized_text: str | None = None
+    ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    ocr_engine: str | None = None
+    perspective_corrected: bool = False
 
 
 class ReferencePreviewRequest(BaseModel):

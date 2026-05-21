@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.analysis.board_gate import assess_chalkboard_image
-from app.analysis.reference import render_reference_mask
+from app.analysis.ocr import OCRLine, OCRResult
 from app.main import app
 
 
@@ -28,10 +28,37 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _post_analyze(client: TestClient, png_bytes: bytes, target_text: str) -> object:
+def _post_analyze(
+    client: TestClient,
+    png_bytes: bytes,
+    target_text: str | None = None,
+    corrected_text: str | None = None,
+) -> object:
     files = {"file": ("t.png", png_bytes, "image/png")}
-    data = {"target_text": target_text}
+    data: dict[str, str] = {}
+    if target_text is not None:
+        data["target_text"] = target_text
+    if corrected_text is not None:
+        data["corrected_text"] = corrected_text
+    if not data:
+        return client.post("/analyze", files=files)
     return client.post("/analyze", files=files, data=data)
+
+
+def _stub_ocr(monkeypatch: pytest.MonkeyPatch, text: str = "板書テキスト", confidence: float = 0.82) -> None:
+    def _fake_ocr(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text=text,
+            lines=[OCRLine(text=text, confidence=confidence, bbox=[(0.0, 0.0), (120.0, 0.0), (120.0, 24.0), (0.0, 24.0)])],
+            confidence=confidence,
+            engine="stub-ocr",
+            available=True,
+            notes=[],
+            error_code=None,
+            error_message=None,
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _fake_ocr)
 
 
 def test_health_ok(client: TestClient) -> None:
@@ -78,17 +105,62 @@ def test_reference_preview_out_of_range_returns_422(client: TestClient) -> None:
     assert res2.status_code == 422
 
 
-def test_analyze_requires_target_text(client: TestClient) -> None:
-    files = {"file": ("t.png", _tiny_png_bytes(), "image/png")}
-    res = client.post("/analyze", files=files, data={"target_text": "  "})
-    assert res.status_code == 400
-    assert "お手本" in res.json().get("detail", "")
+def test_analyze_returns_422_when_ocr_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _unavailable(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="",
+            lines=[],
+            confidence=0.0,
+            engine="easyocr",
+            available=False,
+            notes=["OCR エンジン（EasyOCR）が未導入です。"],
+            error_code="ocr_unavailable",
+            error_message="OCR エンジン（EasyOCR）が未導入です。",
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _unavailable)
+    res = _post_analyze(client, _tiny_png_bytes())
+    assert res.status_code == 422
+    detail = res.json().get("detail", "")
+    assert "OCR エンジン" in detail and ("未導入" in detail or "未設定" in detail)
 
 
-def test_analyze_missing_target_text_field_uses_empty_and_400(client: TestClient) -> None:
-    files = {"file": ("t.png", _tiny_png_bytes(), "image/png")}
-    res = client.post("/analyze", files=files)
-    assert res.status_code == 400
+def test_analyze_returns_422_when_ocr_init_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _init_failed(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="",
+            lines=[],
+            confidence=0.0,
+            engine="easyocr",
+            available=False,
+            notes=["OCR エンジンの初期化に失敗しました。"],
+            error_code="ocr_init_failed",
+            error_message="OCR エンジンの初期化に失敗しました。",
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _init_failed)
+    res = _post_analyze(client, _tiny_png_bytes())
+    assert res.status_code == 422
+    assert "初期化" in res.json().get("detail", "")
+
+
+def test_analyze_returns_422_when_ocr_runtime_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _runtime_failed(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="",
+            lines=[],
+            confidence=0.0,
+            engine="easyocr",
+            available=True,
+            notes=["OCR 実行中にエラーが発生しました。"],
+            error_code="ocr_runtime_failed",
+            error_message="OCR 実行中にエラーが発生しました。",
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _runtime_failed)
+    res = _post_analyze(client, _tiny_png_bytes())
+    assert res.status_code == 422
+    assert "OCR 実行中" in res.json().get("detail", "")
 
 
 def test_analyze_rejects_non_image(client: TestClient) -> None:
@@ -114,7 +186,7 @@ def test_analyze_rejects_corrupt_image(client: TestClient) -> None:
 
 def test_analyze_rejects_white_background_black_text(client: TestClient) -> None:
     img = _synthetic_whiteboard_like()
-    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    res = _post_analyze(client, _encode_png_bgr(img))
     assert res.status_code == 422
     assert "黒板" in res.json().get("detail", "")
 
@@ -122,22 +194,36 @@ def test_analyze_rejects_white_background_black_text(client: TestClient) -> None
 def test_analyze_rejects_solid_dark_without_text(client: TestClient) -> None:
     img = np.zeros((360, 560, 3), dtype=np.uint8)
     img[:, :] = (36, 82, 44)
-    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    res = _post_analyze(client, _encode_png_bgr(img))
     assert res.status_code == 422
 
 
 def test_analyze_rejects_random_noise_image(client: TestClient) -> None:
     rng = np.random.default_rng(1234)
     img = rng.integers(0, 256, (360, 560, 3), dtype=np.uint8)
-    res = _post_analyze(client, _encode_png_bgr(img), "abc")
+    res = _post_analyze(client, _encode_png_bgr(img))
     assert res.status_code == 422
 
 
-def test_analyze_accepts_minimal_png(client: TestClient) -> None:
-    res = _post_analyze(client, _tiny_png_bytes(), "ab")
+def test_analyze_accepts_minimal_png_with_stubbed_ocr(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_ocr(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="AB",
+            lines=[OCRLine(text="AB", confidence=0.81, bbox=[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)])],
+            confidence=0.81,
+            engine="stub-ocr",
+            available=True,
+            notes=[],
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _fake_ocr)
+    res = _post_analyze(client, _tiny_png_bytes())
     assert res.status_code == 200
     body = res.json()
     assert body.get("pipeline_stage") == "full"
+    assert body.get("mode") == "ocr"
+    assert isinstance(body.get("perspective_corrected"), bool)
+    assert body.get("recognized_text") == "AB"
     assert body.get("reference_comparison") is not None
     for k, v in body["scores"].items():
         assert 0.0 <= v <= 1.0
@@ -148,28 +234,120 @@ def test_analyze_accepts_minimal_png(client: TestClient) -> None:
     assert ov["image_width"] > 0 and ov["image_height"] > 0
 
 
-def test_analyze_accepts_render_based_chalkboard_image(client: TestClient) -> None:
-    """参照マスクから作った黒板風画像でも /analyze が通る。"""
-    text_match = "AB AB AB\nAB AB AB"
-    w, h = 420, 280
-    rr = render_reference_mask(text_match, w, h)
-    bgr = _chalkboard_base(h, w)
-    chalk = rr.mask > 127
-    bgr[chalk] = (228, 228, 228)
-    png = _encode_png_bgr(bgr)
-    res = _post_analyze(client, png, text_match)
+def test_analyze_ocr_mode_with_stubbed_recognizer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_ocr(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="二次方程式の解の公式",
+            lines=[OCRLine(text="二次方程式の解の公式", confidence=0.82, bbox=[(0.0, 0.0), (100.0, 0.0), (100.0, 20.0), (0.0, 20.0)])],
+            confidence=0.82,
+            engine="stub-ocr",
+            available=True,
+            notes=[],
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _fake_ocr)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res = client.post("/analyze", files={"file": ("ocr.png", payload, "image/png")})
     assert res.status_code == 200
     body = res.json()
+    assert body.get("mode") == "ocr"
+    assert body.get("recognized_text") == "二次方程式の解の公式"
+    assert body.get("ocr_engine") == "stub-ocr"
+    assert body.get("ocr_confidence", 0.0) > 0.7
+    assert isinstance(body.get("perspective_corrected"), bool)
     assert body.get("pipeline_stage") == "full"
+
+
+def test_analyze_ocr_mode_ignores_target_text_when_stubbed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_ocr(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="OCR文字列",
+            lines=[OCRLine(text="OCR文字列", confidence=0.8, bbox=[(0.0, 0.0), (80.0, 0.0), (80.0, 20.0), (0.0, 20.0)])],
+            confidence=0.8,
+            engine="stub-ocr",
+            available=True,
+            notes=[],
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _fake_ocr)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res_with_text = _post_analyze(client, payload, "このテキストは解析に使わない")
+    res_without_text = _post_analyze(client, payload)
+    assert res_with_text.status_code == 200 and res_without_text.status_code == 200
+    j1 = res_with_text.json()
+    j2 = res_without_text.json()
+    assert j1["mode"] == "ocr" and j2["mode"] == "ocr"
+    assert j1["recognized_text"] == "OCR文字列" and j2["recognized_text"] == "OCR文字列"
+
+
+def test_analyze_manual_corrected_text_bypasses_ocr(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _should_not_run(_image: np.ndarray) -> OCRResult:
+        raise AssertionError("OCR should be skipped when corrected_text is provided")
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _should_not_run)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res = _post_analyze(client, payload, corrected_text="手動で修正した文字列")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("mode") == "manual"
+    assert body.get("recognized_text") == "手動で修正した文字列"
+    assert body.get("ocr_engine") == "manual"
+    assert body.get("ocr_confidence") is None
     assert body.get("reference_comparison") is not None
 
 
-def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient) -> None:
+def test_analyze_ocr_mode_returns_422_on_ocr_exception(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(_image: np.ndarray) -> OCRResult:
+        raise RuntimeError("ocr internal error")
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _boom)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res = _post_analyze(client, payload)
+    assert res.status_code == 422
+    assert "OCR 実行中" in res.json().get("detail", "")
+
+
+def test_analyze_ocr_mode_returns_422_on_empty_recognition(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _empty(_image: np.ndarray) -> OCRResult:
+        return OCRResult(text="", lines=[], confidence=0.0, engine="stub-ocr", available=True, notes=[])
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _empty)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res = _post_analyze(client, payload)
+    assert res.status_code == 422
+    assert "文字を認識できませんでした" in res.json().get("detail", "")
+
+
+def test_analyze_ocr_mode_returns_result_on_low_confidence_for_correction(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _low_conf(_image: np.ndarray) -> OCRResult:
+        return OCRResult(
+            text="低信頼度テキスト",
+            lines=[OCRLine(text="低信頼度テキスト", confidence=0.1, bbox=[(0.0, 0.0), (80.0, 0.0), (80.0, 20.0), (0.0, 20.0)])],
+            confidence=0.1,
+            engine="stub-ocr",
+            available=True,
+            notes=["OCR の信頼度が低めです。認識結果に誤りが含まれる可能性があります。"],
+        )
+
+    monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _low_conf)
+    payload = _encode_png_bgr(_synthetic_dense_board())
+    res = _post_analyze(client, payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("recognized_text") == "低信頼度テキスト"
+    assert body.get("ocr_confidence") == 0.1
+    assert any("修正して再解析" in note for note in body.get("notes", []))
+
+
+def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """密と疎で、レイアウト関連スコアに差が出る。"""
+    _stub_ocr(monkeypatch)
     dense = _encode_png_bgr(_synthetic_dense_board())
     sparse = _encode_png_bgr(_synthetic_sparse_board())
-    rd = _post_analyze(client, dense, "abcdefghijklmnopqr").json()
-    rs = _post_analyze(client, sparse, "abcdefghijklmnopqr").json()
+    rd = _post_analyze(client, dense).json()
+    rs = _post_analyze(client, sparse).json()
     assert rd.get("pipeline_stage") == "full" and rs.get("pipeline_stage") == "full"
     score_keys = ["horizontalness", "spacing_uniformity", "size_consistency", "visibility"]
     diffs = [abs(rd["scores"][k] - rs["scores"][k]) for k in score_keys]
@@ -177,12 +355,13 @@ def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient) -> 
     assert rd["scores"]["spacing_uniformity"] > rs["scores"]["spacing_uniformity"]
 
 
-def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient) -> None:
+def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """不揃いの文字サイズ・行ゆれがある画像ではサイズ一貫性が下がる。"""
+    _stub_ocr(monkeypatch)
     neat = _encode_png_bgr(_synthetic_dense_board())
     irregular = _encode_png_bgr(_synthetic_irregular_board())
-    rn = _post_analyze(client, neat, "abcdefghijklmnopqr").json()
-    ri = _post_analyze(client, irregular, "abcdefghijklmnopqr").json()
+    rn = _post_analyze(client, neat).json()
+    ri = _post_analyze(client, irregular).json()
     assert rn.get("pipeline_stage") == "full" and ri.get("pipeline_stage") == "full"
     assert rn["scores"]["size_consistency"] > ri["scores"]["size_consistency"] + 0.05
 

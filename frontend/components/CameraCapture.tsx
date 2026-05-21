@@ -32,19 +32,19 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   const hints: string[] = [];
   const t = 0.72;
   if (scores.horizontalness < t) {
-    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、お手本との一致が上がりやすくなります。");
+    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、認識文字との一致が上がりやすくなります。");
   }
   if (scores.spacing_uniformity < t) {
-    hints.push("文字同士の間隔をお手本に近づけると、等間隔性の評価が改善します。");
+    hints.push("文字同士の間隔を揃えると、等間隔性の評価が改善します。");
   }
   if (scores.size_consistency < t) {
-    hints.push("文字の高さや太さをお手本に揃えると、サイズ一貫性のスコアが上がります。");
+    hints.push("文字の高さや太さを揃えると、サイズ一貫性のスコアが上がります。");
   }
   if (scores.visibility < t) {
     hints.push("コントラスト（背景との差）をはっきりさせ、細すぎる線を避けると視認性が上がります。");
   }
   if (ref && ref.font_similarity < 0.55) {
-    hints.push("お手本テキストの形に近づけるようゆっくり書くと、お手本との一致度が上がりやすいです。");
+    hints.push("認識された文字の形に近づけるようゆっくり書くと、一致度が上がりやすいです。");
   }
   if (hints.length === 0) {
     hints.push("バランスが良いです。この調子で書き続けましょう。");
@@ -83,9 +83,20 @@ function formatUserError(e: unknown): string {
   if (e instanceof TypeError && /fetch|network|load failed/i.test(String(e.message))) {
     return "バックエンドに接続できません。`NEXT_PUBLIC_API_URL` と API の起動状態を確認してください。";
   }
+  if (e instanceof Error && /OCR エンジンが未設定/.test(e.message)) {
+    return "OCR エンジンが未設定です。管理者に OCR 依存関係の設定を確認してください。";
+  }
+  if (e instanceof Error && /文字を認識できませんでした/.test(e.message)) {
+    return "文字を認識できませんでした。黒板全体を明るく、正面から撮影してください。";
+  }
   if (e instanceof Error) return e.message;
   return "予期しないエラーが発生しました。";
 }
+
+type LastAnalysisImage = {
+  blob: Blob;
+  filename: string;
+};
 
 export function CameraCapture() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -101,6 +112,8 @@ export function CameraCapture() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BanshoAnalysisResult | null>(null);
+  const [recognizedTextDraft, setRecognizedTextDraft] = useState("");
+  const [lastAnalysisImage, setLastAnalysisImage] = useState<LastAnalysisImage | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -147,6 +160,8 @@ export function CameraCapture() {
     setResult(null);
     setError(null);
     setTargetText("");
+    setRecognizedTextDraft("");
+    setLastAnalysisImage(null);
     revokePreview();
     revokeReferencePreview();
     stopCamera();
@@ -156,6 +171,9 @@ export function CameraCapture() {
     setError(null);
     setPermissionDenied(false);
     setIsStarting(true);
+    setResult(null);
+    setRecognizedTextDraft("");
+    setLastAnalysisImage(null);
     revokePreview();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -193,6 +211,8 @@ export function CameraCapture() {
       }
       setError(null);
       setResult(null);
+      setRecognizedTextDraft("");
+      setLastAnalysisImage(null);
       stopCamera();
       revokePreview();
       const url = URL.createObjectURL(file);
@@ -218,6 +238,13 @@ export function CameraCapture() {
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
+      const trimmed = targetText.trim();
+      if (!trimmed) {
+        revokeReferencePreview();
+        setReferencePreviewError(false);
+        setIsReferencePreviewLoading(false);
+        return;
+      }
       if (apiBase.configError) {
         revokeReferencePreview();
         setIsReferencePreviewLoading(false);
@@ -228,7 +255,7 @@ export function CameraCapture() {
       setReferencePreviewError(false);
       try {
         const blob = await fetchReferencePreviewPng({
-          targetText,
+          targetText: trimmed,
           width: 960,
           height: 540,
           signal: controller.signal,
@@ -256,23 +283,23 @@ export function CameraCapture() {
     };
   }, [apiBase.configError, revokeReferencePreview, targetText]);
 
+  const applyAnalysisResult = useCallback((data: BanshoAnalysisResult) => {
+    setResult(data);
+    setRecognizedTextDraft(data.recognized_text?.trim() ?? "");
+  }, []);
+
   const runAnalysis = useCallback(async () => {
     setError(null);
     if (apiBase.configError) {
       setError(formatUserError(new Error(apiBase.configError)));
       return;
     }
-    const text = targetText.trim();
-    if (!text) {
-      setError("お手本テキストを入力してください。板書に書いた内容と同じ文字列を指定します。");
-      return;
-    }
-
     try {
       if (selectedFile) {
         setIsAnalyzing(true);
-        const data = await analyzeBoardImage(selectedFile, text, selectedFile.name);
-        setResult(data);
+        setLastAnalysisImage({ blob: selectedFile, filename: selectedFile.name });
+        const data = await analyzeBoardImage(selectedFile, selectedFile.name);
+        applyAnalysisResult(data);
         return;
       }
 
@@ -295,41 +322,74 @@ export function CameraCapture() {
       if (!blob) {
         throw new Error("画像の変換に失敗しました");
       }
-      const data = await analyzeBoardImage(blob, text, "capture.jpg");
-      setResult(data);
+      const filename = "capture.jpg";
+      setLastAnalysisImage({ blob, filename });
+      const data = await analyzeBoardImage(blob, filename);
+      applyAnalysisResult(data);
     } catch (e) {
       setError(formatUserError(e));
     } finally {
       setIsAnalyzing(false);
     }
-  }, [apiBase.configError, selectedFile, streamActive, targetText]);
+  }, [apiBase.configError, applyAnalysisResult, selectedFile, streamActive]);
+
+  const rerunWithCorrection = useCallback(async () => {
+    setError(null);
+    if (apiBase.configError) {
+      setError(formatUserError(new Error(apiBase.configError)));
+      return;
+    }
+    if (!lastAnalysisImage) {
+      setError("再解析する画像がありません。もう一度画像を選ぶか撮影してください。");
+      return;
+    }
+    const corrected = recognizedTextDraft.trim();
+    if (!corrected) {
+      setError("修正後の文字列を入力してください。");
+      return;
+    }
+
+    try {
+      setIsAnalyzing(true);
+      const data = await analyzeBoardImage(lastAnalysisImage.blob, lastAnalysisImage.filename, corrected);
+      applyAnalysisResult(data);
+    } catch (e) {
+      setError(formatUserError(e));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [apiBase.configError, applyAnalysisResult, lastAnalysisImage, recognizedTextDraft]);
 
   const { overlay } = result ?? {};
   const w = overlay?.image_width ?? 1;
   const h = overlay?.image_height ?? 1;
   const guide = overlay?.guide ?? null;
 
-  const hasInput = !!(selectedFile || streamActive) && targetText.trim().length > 0;
+  const isReferenceMode = targetText.trim().length > 0;
+  const canAnalyze = !!(selectedFile || streamActive);
   const hints = result ? improvementHints(result) : [];
   const summaryPct = result ? Math.round(averageScore(result.scores) * 100) : null;
+  const resultText = result?.recognized_text?.trim() ?? "";
+  const canRerunWithCorrection =
+    !!lastAnalysisImage &&
+    recognizedTextDraft.trim().length > 0 &&
+    (!result || recognizedTextDraft.trim() !== resultText);
 
   return (
     <section className="space-y-6">
       <div className="space-y-2 text-center sm:text-left">
         <p className="text-sm leading-relaxed text-zinc-400">
           <span className="sr-only">手順：</span>
-          お手本テキストを入力し、画像を選ぶかカメラで撮影してから「解析する」。
-          サーバーがお手本形状と写真の線を比較してスコアを出します（OCR は使いません）。
+          画像を選ぶかカメラで撮影して「解析する」。解析は常に OCR モードで実行します。
+          OCR の文字が違う場合は、結果画面で修正して再解析できます。お手本テキストは練習用プレビュー表示のみに使います。
         </p>
       </div>
 
       <div className="space-y-2">
         <label htmlFor="target-text" className="block text-sm font-medium text-zinc-200">
-          お手本テキスト
+          お手本テキスト（任意）
         </label>
-        <p className="text-xs text-zinc-500">
-          この文字列をチョーク体のお手本として比較します。板書に書いた内容と同じテキストを入力してください。
-        </p>
+        <p className="text-xs text-zinc-500">練習用プレビューです。解析には使いません。</p>
         <textarea
           id="target-text"
           value={targetText}
@@ -340,12 +400,11 @@ export function CameraCapture() {
           disabled={isAnalyzing}
           autoComplete="off"
         />
-        {!hasInput && (selectedFile || streamActive) ? (
-          <p className="text-xs text-amber-200/90">画像とお手本テキストの両方を入力してください。</p>
-        ) : null}
+        {!isReferenceMode ? <p className="text-xs text-zinc-500">空欄時は OCR で文字を推定します。</p> : null}
       </div>
 
-      <div className="space-y-2">
+      {isReferenceMode ? (
+        <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-200">お手本プレビュー</p>
         <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-[rgb(44,82,48)]">
           {referencePreviewUrl ? (
@@ -366,7 +425,8 @@ export function CameraCapture() {
         {referencePreviewError ? (
           <p className="text-xs text-zinc-500">お手本プレビューを作成できませんでした。</p>
         ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <input
         ref={fileInputRef}
@@ -405,7 +465,7 @@ export function CameraCapture() {
             </div>
           ) : null}
 
-          {overlay && (previewUrl || streamActive) && (
+          {overlay && (previewUrl || streamActive) && !result?.perspective_corrected && (
             <svg
               className="pointer-events-none absolute inset-0 h-full w-full"
               viewBox={`0 0 ${w} ${h}`}
@@ -451,6 +511,11 @@ export function CameraCapture() {
                 ))}
               </g>
             </svg>
+          )}
+          {result?.perspective_corrected && (
+            <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-zinc-950/70 px-2 py-1 text-[11px] text-zinc-300">
+              台形補正後の座標で解析したため、元画像上のオーバーレイ表示は省略しています。
+            </div>
           )}
 
           {isAnalyzing && (
@@ -502,7 +567,7 @@ export function CameraCapture() {
         <button
           type="button"
           onClick={runAnalysis}
-          disabled={isAnalyzing || !hasInput}
+          disabled={isAnalyzing || !canAnalyze}
           className="flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg transition hover:bg-sky-500 disabled:opacity-50"
         >
           {isAnalyzing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Scan className="h-5 w-5" />}
@@ -538,6 +603,32 @@ export function CameraCapture() {
         </p>
       )}
 
+      {error && lastAnalysisImage && !result ? (
+        <div className="space-y-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-sm text-amber-50">
+          <label htmlFor="manual-retry-text" className="block text-xs font-medium text-amber-100/90">
+            OCR できなかった場合の手入力
+          </label>
+          <textarea
+            id="manual-retry-text"
+            value={recognizedTextDraft}
+            onChange={(e) => setRecognizedTextDraft(e.target.value)}
+            rows={3}
+            className="w-full resize-y rounded-lg border border-amber-800/60 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            placeholder="板書に書かれている文字列を入力"
+            disabled={isAnalyzing}
+          />
+          <button
+            type="button"
+            onClick={rerunWithCorrection}
+            disabled={isAnalyzing || !canRerunWithCorrection}
+            className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-45"
+          >
+            {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            入力文字で解析
+          </button>
+        </div>
+      ) : null}
+
       {result && summaryPct !== null && (
         <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -545,12 +636,55 @@ export function CameraCapture() {
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
-            水平度・間隔・サイズは写真の実レイアウトを主に評価し、参照形状との比較を補助的に反映しています。視認性は写真のコントラスト等から算出します（0〜100%）。
+            OCR で認識した文字をチョーク体で再描画し、認識文字のチョーク体参照との一致を評価しています。
+            視認性は写真のコントラスト等から算出します（0〜100%）。
           </p>
+
+          {result.mode === "ocr" || result.mode === "manual" ? (
+            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-sm text-zinc-300">
+              <div className="space-y-1">
+                <p>
+                  認識モード:{" "}
+                  {result.mode === "manual" ? "手動修正" : `自動認識（${result.ocr_engine ?? "unknown"}）`}
+                </p>
+                {result.mode === "ocr" ? (
+                  <p>
+                    OCR 信頼度:{" "}
+                    {typeof result.ocr_confidence === "number" ? `${(result.ocr_confidence * 100).toFixed(0)}%` : "不明"}
+                  </p>
+                ) : (
+                  <p>修正した文字列で再解析済みです。</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="recognized-text" className="block text-xs font-medium text-zinc-400">
+                  解析に使う文字列
+                </label>
+                <textarea
+                  id="recognized-text"
+                  value={recognizedTextDraft}
+                  onChange={(e) => setRecognizedTextDraft(e.target.value)}
+                  rows={3}
+                  className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none focus:ring-1 focus:ring-sky-600"
+                  placeholder="OCR 結果が違う場合はここで修正"
+                  disabled={isAnalyzing}
+                />
+                <button
+                  type="button"
+                  onClick={rerunWithCorrection}
+                  disabled={isAnalyzing || !canRerunWithCorrection}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-45"
+                >
+                  {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  修正して再解析
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {result.reference_comparison && (
             <div className="rounded-xl border border-sky-900/40 bg-sky-950/20 p-4">
-              <p className="mb-2 text-xs font-medium text-sky-200/90">お手本テキストとの形状一致</p>
+              <p className="mb-2 text-xs font-medium text-sky-200/90">解析文字のチョーク体参照との一致</p>
               <p className="font-mono text-2xl tabular-nums text-sky-300">
                 {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
               </p>
