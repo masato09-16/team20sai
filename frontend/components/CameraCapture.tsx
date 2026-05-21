@@ -18,10 +18,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
   const map: Record<keyof BanshoAnalysisResult["scores"], string> = {
-    horizontalness: "水平度",
-    spacing_uniformity: "等間隔性",
+    readability: "可読性",
+    line_alignment: "行の整い",
+    spacing_balance: "字間・行間",
+    stroke_quality: "線の安定感",
+    horizontalness: "水平度（互換）",
+    spacing_uniformity: "等間隔性（互換）",
     size_consistency: "文字サイズ一貫性",
-    visibility: "視認性",
+    visibility: "撮影品質",
   };
   return map[key];
 }
@@ -30,20 +34,26 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   const scores = result.scores;
   const hints: string[] = [];
   const t = 0.72;
-  if (scores.horizontalness < t) {
-    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、水平度が上がりやすくなります。");
+  if (scores.readability < t) {
+    hints.push("全体として読み取りやすい字形を意識し、潰れた文字や詰まりすぎを減らすと可読性が上がります。");
   }
-  if (scores.spacing_uniformity < t) {
-    hints.push("文字同士の間隔を揃えると、等間隔性の評価が改善します。");
+  if (scores.line_alignment < t) {
+    hints.push("行の傾きと上下ぶれを抑え、ベースラインを揃えると行の整いが改善します。");
   }
   if (scores.size_consistency < t) {
     hints.push("文字の高さや太さを揃えると、サイズ一貫性のスコアが上がります。");
   }
+  if (scores.spacing_balance < t) {
+    hints.push("字間・行間の詰まりや空きすぎを抑えると、読みやすさが安定します。");
+  }
+  if (scores.stroke_quality < t) {
+    hints.push("線が薄い・かすれる場合は、チョーク圧や撮影距離を調整すると線の安定感が上がります。");
+  }
   if (scores.visibility < t) {
-    hints.push("コントラスト（背景との差）をはっきりさせ、細すぎる線を避けると視認性が上がります。");
+    hints.push("撮影品質が低めです。暗さ・ピント・斜め撮影を改善すると評価の安定性が上がります。");
   }
   if (result.mode === "ocr" && typeof result.ocr_confidence === "number" && result.ocr_confidence < 0.6) {
-    hints.push("OCR の信頼度が低めです。認識文字が違う場合は、結果欄で修正して再解析してください。");
+    hints.push("OCR の信頼度が低めです。文字列が違う場合は修正して再解析してください（主評価は字形中心です）。");
   }
   if (hints.length === 0) {
     hints.push("バランスが良いです。この調子で書き続けましょう。");
@@ -51,9 +61,14 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   return hints;
 }
 
-function averageScore(scores: BanshoAnalysisResult["scores"]): number {
-  const v = Object.values(scores);
-  return v.reduce((a, b) => a + b, 0) / v.length;
+function overallScore(scores: BanshoAnalysisResult["scores"]): number {
+  return (
+    scores.readability * 0.35 +
+    scores.line_alignment * 0.25 +
+    scores.size_consistency * 0.2 +
+    scores.spacing_balance * 0.1 +
+    scores.stroke_quality * 0.1
+  );
 }
 
 function drawVideoToCanvas(
@@ -385,7 +400,7 @@ export function CameraCapture() {
   const hasPracticeText = targetText.trim().length > 0;
   const canAnalyze = !!(selectedFile || streamActive);
   const hints = result ? improvementHints(result) : [];
-  const summaryPct = result ? Math.round(averageScore(result.scores) * 100) : null;
+  const summaryPct = result ? Math.round(overallScore(result.scores) * 100) : null;
   const resultText = result?.recognized_text?.trim() ?? "";
   const canRerunWithCorrection =
     !!lastAnalysisImage &&
@@ -653,8 +668,8 @@ export function CameraCapture() {
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
-            行の揃い・行間・文字サイズ・視認性を中心に評価しています。
-            解析文字列は OCR または手動修正で指定された内容です。
+            主評価は可読性・行の整い・文字サイズ・字間行間・線の安定感です。
+            撮影品質と OCR 文字列は補助情報として扱います。
           </p>
 
           {result.mode === "ocr" || result.mode === "manual" ? (
@@ -701,20 +716,22 @@ export function CameraCapture() {
 
           {result.reference_comparison && (
             <div className="rounded-xl border border-sky-900/40 bg-sky-950/20 p-4">
-              <p className="mb-2 text-xs font-medium text-sky-200/90">参考: 解析文字列との形状照合</p>
+              <p className="mb-2 text-xs font-medium text-sky-200/90">参考: 認識文字のチョーク体参照との一致</p>
               <p className="font-mono text-2xl tabular-nums text-sky-300">
                 {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
               </p>
               <p className="mt-2 text-[11px] text-zinc-500">
-                手書きとフォントの差で低めに出る場合があります。{" "}
+                手書きとフォントの差で低めに出る場合があります（総合評価には使いません）。{" "}
                 IoU {(result.reference_comparison.iou * 100).toFixed(0)}% / Dice{" "}
                 {(result.reference_comparison.dice_coefficient * 100).toFixed(0)}% / 画素一致{" "}
                 {(result.reference_comparison.pixel_agreement * 100).toFixed(0)}%
               </p>
             </div>
           )}
-          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {(Object.keys(result.scores) as (keyof BanshoAnalysisResult["scores"])[]).map((key) => (
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {(
+              ["readability", "line_alignment", "size_consistency", "spacing_balance", "stroke_quality", "visibility"] as const
+            ).map((key) => (
               <div
                 key={key}
                 className="rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-left"

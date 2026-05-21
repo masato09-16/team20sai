@@ -33,6 +33,10 @@ class GridGuide(BaseModel):
 class AnalysisScores(BaseModel):
     """0.0〜1.0 を想定。1.0 が理想に近い。"""
 
+    readability: float = Field(..., ge=0.0, le=1.0)
+    line_alignment: float = Field(..., ge=0.0, le=1.0)
+    spacing_balance: float = Field(..., ge=0.0, le=1.0)
+    stroke_quality: float = Field(..., ge=0.0, le=1.0)
     horizontalness: float = Field(..., ge=0.0, le=1.0)
     spacing_uniformity: float = Field(..., ge=0.0, le=1.0)
     size_consistency: float = Field(..., ge=0.0, le=1.0)

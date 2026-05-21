@@ -21,8 +21,8 @@ def _clamp01(x: float) -> float:
     return float(np.clip(x, 0.0, 1.0))
 
 
-def _blend_layout_score(metric_score: float, ref_score: float, ref_weight: float = 0.08) -> float:
-    """実画像レイアウトを主とし、参照比較を補助的にブレンドする。"""
+def _blend_layout_score(metric_score: float, ref_score: float, ref_weight: float = 0.0) -> float:
+    """実画像レイアウトを主評価とし、参照比較は極小補助に留める。"""
     rw = float(np.clip(ref_weight, 0.0, 0.4))
     mw = 1.0 - rw
     return _clamp01(mw * float(metric_score) + rw * float(ref_score))
@@ -121,9 +121,13 @@ def _run_with_reference_text(
         visibility = 0.25
         dg = default_guide(wo, ho)
         scores = AnalysisScores(
-            horizontalness=float(cmp.layout.horizontalness) * 0.85,
-            spacing_uniformity=float(cmp.layout.spacing_uniformity) * 0.85,
-            size_consistency=float(cmp.layout.size_consistency) * 0.85,
+            readability=0.35,
+            line_alignment=float(cmp.layout.horizontalness) * 0.75,
+            spacing_balance=float(cmp.layout.spacing_uniformity) * 0.75,
+            stroke_quality=0.35,
+            horizontalness=float(cmp.layout.horizontalness) * 0.75,
+            spacing_uniformity=float(cmp.layout.spacing_uniformity) * 0.75,
+            size_consistency=float(cmp.layout.size_consistency) * 0.75,
             visibility=visibility,
         )
         overlay = AnalysisOverlay(image_width=wo, image_height=ho, baseline_y_positions=[], char_boxes=[], guide=dg)
@@ -143,6 +147,10 @@ def _run_with_reference_text(
     merged_notes.extend(metrics.metric_notes)
 
     scores = AnalysisScores(
+        readability=float(metrics.scores.readability),
+        line_alignment=float(metrics.scores.line_alignment),
+        spacing_balance=float(metrics.scores.spacing_balance),
+        stroke_quality=float(metrics.scores.stroke_quality),
         horizontalness=_blend_layout_score(metrics.scores.horizontalness, cmp.layout.horizontalness),
         spacing_uniformity=_blend_layout_score(metrics.scores.spacing_uniformity, cmp.layout.spacing_uniformity),
         size_consistency=_blend_layout_score(metrics.scores.size_consistency, cmp.layout.size_consistency),
@@ -206,7 +214,9 @@ def run_ocr_analysis(
     perspective_corrected: bool = False,
 ) -> BanshoAnalysisResult:
     merged_notes: list[str] = list(pre_notes or [])
-    merged_notes.append("OCR により認識した文字列を使い、写真の行揃い・行間・サイズ・視認性を中心に評価しています。")
+    merged_notes.append(
+        "OCR 文字列は比較の補助に使い、主評価は可読性・行の整い・文字サイズ安定・字間行間・線の安定感で行います。"
+    )
     try:
         ocr = recognize_board_text(image_bgr_u8)
     except Exception as exc:  # 念のため OCR 実行時の例外を 422 へ寄せる
@@ -229,7 +239,7 @@ def run_ocr_analysis(
     if not ocr.text.strip():
         raise ValueError("文字を認識できませんでした。黒板全体を明るく、正面から撮影してください。")
     if ocr.confidence < 0.35:
-        merged_notes.append("OCR の信頼度がかなり低いため、認識文字を確認し、違う場合は修正して再解析してください。")
+        raise ValueError("OCR の信頼度が低いため解析を中止しました。黒板全体を明るく、正面から撮影してください。")
 
     return _run_with_reference_text(
         image_bgr_u8,
@@ -254,7 +264,9 @@ def run_manual_text_analysis(
         raise ValueError("修正後の文字列を入力してください。")
 
     merged_notes: list[str] = list(pre_notes or [])
-    merged_notes.append("ユーザーが修正した文字列を使い、写真の行揃い・行間・サイズ・視認性を中心に評価しています。")
+    merged_notes.append(
+        "ユーザーが修正した文字列を補助に使い、主評価は可読性・行の整い・文字サイズ安定・字間行間・線の安定感で行います。"
+    )
     return _run_with_reference_text(
         image_bgr_u8,
         text,
