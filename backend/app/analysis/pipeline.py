@@ -21,7 +21,7 @@ def _clamp01(x: float) -> float:
     return float(np.clip(x, 0.0, 1.0))
 
 
-def _blend_layout_score(metric_score: float, ref_score: float, ref_weight: float = 0.18) -> float:
+def _blend_layout_score(metric_score: float, ref_score: float, ref_weight: float = 0.08) -> float:
     """実画像レイアウトを主とし、参照比較を補助的にブレンドする。"""
     rw = float(np.clip(ref_weight, 0.0, 0.4))
     mw = 1.0 - rw
@@ -206,7 +206,7 @@ def run_ocr_analysis(
     perspective_corrected: bool = False,
 ) -> BanshoAnalysisResult:
     merged_notes: list[str] = list(pre_notes or [])
-    merged_notes.append("OCR により認識した文字をチョーク体で再描画し、写真の線形状と比較しています。")
+    merged_notes.append("OCR により認識した文字列を使い、写真の行揃い・行間・サイズ・視認性を中心に評価しています。")
     try:
         ocr = recognize_board_text(image_bgr_u8)
     except Exception as exc:  # 念のため OCR 実行時の例外を 422 へ寄せる
@@ -254,7 +254,7 @@ def run_manual_text_analysis(
         raise ValueError("修正後の文字列を入力してください。")
 
     merged_notes: list[str] = list(pre_notes or [])
-    merged_notes.append("ユーザーが修正した文字列をチョーク体で再描画し、写真の線形状と比較しています。")
+    merged_notes.append("ユーザーが修正した文字列を使い、写真の行揃い・行間・サイズ・視認性を中心に評価しています。")
     return _run_with_reference_text(
         image_bgr_u8,
         text,

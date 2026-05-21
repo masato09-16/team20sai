@@ -14,6 +14,14 @@ from app.schemas import AnalysisScores, BoundingBox, GridGuide, Point2D
 
 
 @dataclass(frozen=True)
+class TextLineBox:
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class MetricComputationResult:
     scores: AnalysisScores
     baseline_y_positions: list[float]
@@ -116,6 +124,119 @@ def _cluster_rows(cy_s: np.ndarray, heights_s: np.ndarray) -> list[np.ndarray]:
             current = [int(idx)]
     clusters.append(current)
     return [np.array(c, dtype=np.int32) for c in clusters]
+
+
+def _detect_text_line_boxes(mask: np.ndarray) -> list[TextLineBox]:
+    """チョーク線マスクから、文字列の行単位の外接矩形を推定する。"""
+    h, w = mask.shape[:2]
+    if h <= 2 or w <= 2:
+        return []
+
+    k_w = max(21, min(65, round(w / 18.0)))
+    k_h = max(5, min(17, round(h / 100.0)))
+    dilated = cv2.dilate((mask > 127).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_RECT, (k_w, k_h)))
+    dilated = cv2.morphologyEx(
+        dilated,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (max(17, round(w / 24.0)), 3)),
+        iterations=1,
+    )
+    n, _labels, stats, _ = cv2.connectedComponentsWithStats((dilated > 127).astype(np.uint8))
+
+    boxes: list[TextLineBox] = []
+    img_area = float(h * w)
+    for i in range(1, n):
+        sx, sy, sw, sh, area = [int(v) for v in stats[i]]
+        if area < max(80.0, 0.0005 * img_area):
+            continue
+        if sw < 0.08 * w or sh < 0.025 * h:
+            continue
+        if sw > 0.92 * w or sh > 0.28 * h:
+            continue
+        if sy < 0.03 * h and sh < 0.05 * h:
+            continue
+        boxes.append(TextLineBox(x=sx, y=sy, width=sw, height=sh))
+
+    boxes.sort(key=lambda b: (b.y, b.x))
+    merged: list[TextLineBox] = []
+    for box in boxes:
+        if not merged:
+            merged.append(box)
+            continue
+        prev = merged[-1]
+        overlap = min(prev.y + prev.height, box.y + box.height) - max(prev.y, box.y)
+        if overlap > 0.35 * min(prev.height, box.height):
+            x0 = min(prev.x, box.x)
+            y0 = min(prev.y, box.y)
+            x1 = max(prev.x + prev.width, box.x + box.width)
+            y1 = max(prev.y + prev.height, box.y + box.height)
+            merged[-1] = TextLineBox(x=x0, y=y0, width=x1 - x0, height=y1 - y0)
+        else:
+            merged.append(box)
+    return merged
+
+
+def _score_line_horizontalness(mask: np.ndarray, line_boxes: list[TextLineBox]) -> float:
+    if not line_boxes:
+        return 0.35
+
+    scores: list[float] = []
+    for box in line_boxes:
+        x0, y0 = box.x, box.y
+        sub = mask[y0 : y0 + box.height, x0 : x0 + box.width]
+        ys, xs = np.where(sub > 127)
+        if xs.size < 8:
+            scores.append(0.75)
+            continue
+        xs = xs.astype(np.float64) + float(x0)
+        ys = ys.astype(np.float64) + float(y0)
+        bins = np.linspace(float(x0), float(x0 + box.width), 8)
+        bin_x: list[float] = []
+        bin_y: list[float] = []
+        for j in range(len(bins) - 1):
+            selected = (xs >= bins[j]) & (xs < bins[j + 1])
+            if int(np.count_nonzero(selected)) >= 4:
+                bin_x.append(float((bins[j] + bins[j + 1]) / 2.0))
+                bin_y.append(float(np.median(ys[selected])))
+        if len(bin_x) < 3:
+            scores.append(0.78)
+            continue
+        bx = np.array(bin_x, dtype=np.float64)
+        by = np.array(bin_y, dtype=np.float64)
+        slope, intercept = np.polyfit(bx, by, 1)
+        angle_deg = abs(float(np.degrees(np.arctan(float(slope)))))
+        residual = float(np.std(by - (slope * bx + intercept)))
+        residual_norm = residual / max(float(box.height), 1.0)
+        angle_score = float(np.exp(-((angle_deg / 12.0) ** 2)))
+        residual_score = float(np.exp(-((residual_norm / 0.22) ** 2)))
+        scores.append(_clamp01(0.58 * angle_score + 0.42 * residual_score))
+
+    return _clamp01(float(np.mean(scores)))
+
+
+def _score_line_spacing(line_boxes: list[TextLineBox], image_height: int) -> float:
+    if len(line_boxes) < 2:
+        return 0.82 if line_boxes else 0.35
+    centers = np.array([b.y + b.height / 2.0 for b in line_boxes], dtype=np.float64)
+    gaps = np.diff(np.sort(centers))
+    if gaps.size == 0:
+        return 0.82
+    cv = _coefficient_of_variation(gaps)
+    gap_med = float(np.median(gaps))
+    min_reasonable_gap = max(12.0, image_height * 0.035)
+    gap_score = _clamp01(gap_med / min_reasonable_gap) if gap_med < min_reasonable_gap else 1.0
+    uniformity = float(np.exp(-max(0.0, cv - 0.12) * 3.0))
+    return _clamp01(0.82 * uniformity + 0.18 * gap_score)
+
+
+def _score_line_size_consistency(line_boxes: list[TextLineBox]) -> float:
+    if not line_boxes:
+        return 0.35
+    if len(line_boxes) == 1:
+        return 0.84
+    heights = np.array([b.height for b in line_boxes], dtype=np.float64)
+    cv_h = _coefficient_of_variation(heights)
+    return _clamp01(float(np.exp(-max(0.0, cv_h - 0.20) * 3.0)))
 
 
 def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationResult:
@@ -257,6 +378,20 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
     # --- visibility ---
     visibility, vis_notes = compute_visibility_score(mask, gray_u8)
     metric_notes.extend(vis_notes)
+
+    line_boxes = _detect_text_line_boxes(mask)
+    if line_boxes:
+        line_horizontalness = _score_line_horizontalness(mask, line_boxes)
+        line_spacing = _score_line_spacing(line_boxes, h)
+        line_size = _score_line_size_consistency(line_boxes)
+        horizontalness = _clamp01(0.85 * line_horizontalness + 0.15 * horizontalness)
+        spacing_uniformity = _clamp01(0.75 * line_spacing + 0.25 * spacing_uniformity)
+        size_consistency = _clamp01(0.75 * line_size + 0.25 * size_consistency)
+        baseline_y_positions = [float(b.y + b.height * 0.82) for b in line_boxes]
+        char_boxes = [
+            BoundingBox(x=float(b.x), y=float(b.y), width=float(b.width), height=float(b.height))
+            for b in line_boxes
+        ]
 
     scores = AnalysisScores(
         horizontalness=_clamp01(float(horizontalness)),

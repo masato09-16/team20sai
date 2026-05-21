@@ -28,11 +28,10 @@ function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
 
 function improvementHints(result: BanshoAnalysisResult): string[] {
   const scores = result.scores;
-  const ref = result.reference_comparison;
   const hints: string[] = [];
   const t = 0.72;
   if (scores.horizontalness < t) {
-    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、認識文字との一致が上がりやすくなります。");
+    hints.push("行のラインを意識し、文字の足元（ベースライン）が揃うように書くと、水平度が上がりやすくなります。");
   }
   if (scores.spacing_uniformity < t) {
     hints.push("文字同士の間隔を揃えると、等間隔性の評価が改善します。");
@@ -43,8 +42,8 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   if (scores.visibility < t) {
     hints.push("コントラスト（背景との差）をはっきりさせ、細すぎる線を避けると視認性が上がります。");
   }
-  if (ref && ref.font_similarity < 0.55) {
-    hints.push("認識された文字の形に近づけるようゆっくり書くと、一致度が上がりやすいです。");
+  if (result.mode === "ocr" && typeof result.ocr_confidence === "number" && result.ocr_confidence < 0.6) {
+    hints.push("OCR の信頼度が低めです。認識文字が違う場合は、結果欄で修正して再解析してください。");
   }
   if (hints.length === 0) {
     hints.push("バランスが良いです。この調子で書き続けましょう。");
@@ -93,6 +92,11 @@ function formatUserError(e: unknown): string {
   return "予期しないエラーが発生しました。";
 }
 
+function canRecoverWithManualText(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  return /OCR|文字を認識できませんでした/.test(e.message);
+}
+
 type LastAnalysisImage = {
   blob: Blob;
   filename: string;
@@ -114,6 +118,7 @@ export function CameraCapture() {
   const [result, setResult] = useState<BanshoAnalysisResult | null>(null);
   const [recognizedTextDraft, setRecognizedTextDraft] = useState("");
   const [lastAnalysisImage, setLastAnalysisImage] = useState<LastAnalysisImage | null>(null);
+  const [manualRetryAfterError, setManualRetryAfterError] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -162,6 +167,7 @@ export function CameraCapture() {
     setTargetText("");
     setRecognizedTextDraft("");
     setLastAnalysisImage(null);
+    setManualRetryAfterError(false);
     revokePreview();
     revokeReferencePreview();
     stopCamera();
@@ -174,6 +180,7 @@ export function CameraCapture() {
     setResult(null);
     setRecognizedTextDraft("");
     setLastAnalysisImage(null);
+    setManualRetryAfterError(false);
     revokePreview();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -213,6 +220,7 @@ export function CameraCapture() {
       setResult(null);
       setRecognizedTextDraft("");
       setLastAnalysisImage(null);
+      setManualRetryAfterError(false);
       stopCamera();
       revokePreview();
       const url = URL.createObjectURL(file);
@@ -286,10 +294,12 @@ export function CameraCapture() {
   const applyAnalysisResult = useCallback((data: BanshoAnalysisResult) => {
     setResult(data);
     setRecognizedTextDraft(data.recognized_text?.trim() ?? "");
+    setManualRetryAfterError(false);
   }, []);
 
   const runAnalysis = useCallback(async () => {
     setError(null);
+    setManualRetryAfterError(false);
     if (apiBase.configError) {
       setError(formatUserError(new Error(apiBase.configError)));
       return;
@@ -327,14 +337,20 @@ export function CameraCapture() {
       const data = await analyzeBoardImage(blob, filename);
       applyAnalysisResult(data);
     } catch (e) {
+      const recoverable = canRecoverWithManualText(e);
+      setManualRetryAfterError(recoverable);
+      if (recoverable && !recognizedTextDraft.trim() && targetText.trim()) {
+        setRecognizedTextDraft(targetText.trim());
+      }
       setError(formatUserError(e));
     } finally {
       setIsAnalyzing(false);
     }
-  }, [apiBase.configError, applyAnalysisResult, selectedFile, streamActive]);
+  }, [apiBase.configError, applyAnalysisResult, recognizedTextDraft, selectedFile, streamActive, targetText]);
 
   const rerunWithCorrection = useCallback(async () => {
     setError(null);
+    setManualRetryAfterError(false);
     if (apiBase.configError) {
       setError(formatUserError(new Error(apiBase.configError)));
       return;
@@ -354,6 +370,7 @@ export function CameraCapture() {
       const data = await analyzeBoardImage(lastAnalysisImage.blob, lastAnalysisImage.filename, corrected);
       applyAnalysisResult(data);
     } catch (e) {
+      setManualRetryAfterError(canRecoverWithManualText(e));
       setError(formatUserError(e));
     } finally {
       setIsAnalyzing(false);
@@ -365,7 +382,7 @@ export function CameraCapture() {
   const h = overlay?.image_height ?? 1;
   const guide = overlay?.guide ?? null;
 
-  const isReferenceMode = targetText.trim().length > 0;
+  const hasPracticeText = targetText.trim().length > 0;
   const canAnalyze = !!(selectedFile || streamActive);
   const hints = result ? improvementHints(result) : [];
   const summaryPct = result ? Math.round(averageScore(result.scores) * 100) : null;
@@ -380,8 +397,8 @@ export function CameraCapture() {
       <div className="space-y-2 text-center sm:text-left">
         <p className="text-sm leading-relaxed text-zinc-400">
           <span className="sr-only">手順：</span>
-          画像を選ぶかカメラで撮影して「解析する」。解析は常に OCR モードで実行します。
-          OCR の文字が違う場合は、結果画面で修正して再解析できます。お手本テキストは練習用プレビュー表示のみに使います。
+          画像を選ぶかカメラで撮影して「解析する」。OCR の文字が違う場合は、結果画面で修正して再解析できます。
+          お手本テキストは練習用プレビュー表示のみに使います。
         </p>
       </div>
 
@@ -400,10 +417,10 @@ export function CameraCapture() {
           disabled={isAnalyzing}
           autoComplete="off"
         />
-        {!isReferenceMode ? <p className="text-xs text-zinc-500">空欄時は OCR で文字を推定します。</p> : null}
+        {!hasPracticeText ? <p className="text-xs text-zinc-500">入力しなくても解析できます。</p> : null}
       </div>
 
-      {isReferenceMode ? (
+      {hasPracticeText ? (
         <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-200">お手本プレビュー</p>
         <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-[rgb(44,82,48)]">
@@ -603,7 +620,7 @@ export function CameraCapture() {
         </p>
       )}
 
-      {error && lastAnalysisImage && !result ? (
+      {error && manualRetryAfterError && lastAnalysisImage && !result ? (
         <div className="space-y-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-sm text-amber-50">
           <label htmlFor="manual-retry-text" className="block text-xs font-medium text-amber-100/90">
             OCR できなかった場合の手入力
@@ -636,8 +653,8 @@ export function CameraCapture() {
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
-            OCR で認識した文字をチョーク体で再描画し、認識文字のチョーク体参照との一致を評価しています。
-            視認性は写真のコントラスト等から算出します（0〜100%）。
+            行の揃い・行間・文字サイズ・視認性を中心に評価しています。
+            解析文字列は OCR または手動修正で指定された内容です。
           </p>
 
           {result.mode === "ocr" || result.mode === "manual" ? (
@@ -684,11 +701,12 @@ export function CameraCapture() {
 
           {result.reference_comparison && (
             <div className="rounded-xl border border-sky-900/40 bg-sky-950/20 p-4">
-              <p className="mb-2 text-xs font-medium text-sky-200/90">解析文字のチョーク体参照との一致</p>
+              <p className="mb-2 text-xs font-medium text-sky-200/90">参考: 解析文字列との形状照合</p>
               <p className="font-mono text-2xl tabular-nums text-sky-300">
                 {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
               </p>
               <p className="mt-2 text-[11px] text-zinc-500">
+                手書きとフォントの差で低めに出る場合があります。{" "}
                 IoU {(result.reference_comparison.iou * 100).toFixed(0)}% / Dice{" "}
                 {(result.reference_comparison.dice_coefficient * 100).toFixed(0)}% / 画素一致{" "}
                 {(result.reference_comparison.pixel_agreement * 100).toFixed(0)}%
