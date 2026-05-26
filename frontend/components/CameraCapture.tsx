@@ -63,6 +63,18 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   return hints;
 }
 
+function positiveHighlights(result: BanshoAnalysisResult): string[] {
+  const s = result.scores;
+  const picked: string[] = [];
+  if (s.line_alignment >= 0.78) picked.push("行が揃っていて、読み進めやすい板書です。");
+  if (s.size_consistency >= 0.78) picked.push("文字サイズが安定しており、見た目にまとまりがあります。");
+  if (s.spacing_balance >= 0.78) picked.push("字間・行間のバランスがよく、窮屈さが少ないです。");
+  if (s.stroke_quality >= 0.78) picked.push("線が安定していて、文字の形がはっきり伝わります。");
+  if (s.readability >= 0.78) picked.push("全体として読みやすく、授業で伝わりやすい板書です。");
+  if (picked.length === 0) picked.push("読み取りやすい要素が出始めています。このまま続けて整えていきましょう。");
+  return picked.slice(0, 2);
+}
+
 function captureAndRecognitionHints(result: BanshoAnalysisResult): string[] {
   const hints: string[] = [];
   if (result.scores.visibility < 0.72) {
@@ -191,17 +203,23 @@ export function CameraCapture() {
     }
   }, []);
 
-  const resetSession = useCallback(() => {
+  const resetForRetry = useCallback(() => {
     setResult(null);
     setError(null);
-    setTargetText("");
     setRecognizedTextDraft("");
     setLastAnalysisImage(null);
     setManualRetryAfterError(false);
     revokePreview();
-    revokeReferencePreview();
     stopCamera();
-  }, [revokePreview, revokeReferencePreview, stopCamera]);
+  }, [revokePreview, stopCamera]);
+
+  const resetForNewPractice = useCallback(() => {
+    setTargetText("");
+    revokeReferencePreview();
+    setReferencePreviewError(false);
+    setIsReferencePreviewLoading(false);
+    resetForRetry();
+  }, [resetForRetry, revokeReferencePreview]);
 
   const startCamera = useCallback(async () => {
     setError(null);
@@ -414,6 +432,7 @@ export function CameraCapture() {
 
   const hasPracticeText = targetText.trim().length > 0;
   const canAnalyze = !!(selectedFile || streamActive);
+  const positives = result ? positiveHighlights(result) : [];
   const hints = result ? improvementHints(result) : [];
   const captureHints = result ? captureAndRecognitionHints(result) : [];
   const summaryPct = result ? Math.round(overallScore(result.scores) * 100) : null;
@@ -425,36 +444,34 @@ export function CameraCapture() {
 
   return (
     <section className="space-y-6">
-      <div className="space-y-2 text-center sm:text-left">
-        <p className="text-sm leading-relaxed text-zinc-400">
-          <span className="sr-only">手順：</span>
-          画像を選ぶかカメラで撮影して「解析する」。OCR の文字が違う場合は、結果画面で修正して再解析できます。
-          お手本テキストは練習用プレビュー表示のみに使います。
+      <div className="rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
+        <p className="text-sm leading-relaxed text-stone-700">
+          練習した板書を撮影して、今回の読みやすさを確認できます。
         </p>
       </div>
 
-      <div className="space-y-2">
-        <label htmlFor="target-text" className="block text-sm font-medium text-zinc-200">
-          お手本テキスト（任意）
+      <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+        <label htmlFor="target-text" className="block text-sm font-medium text-stone-800">
+          練習する文章（任意）
         </label>
-        <p className="text-xs text-zinc-500">練習用プレビューです。解析には使いません。</p>
+        <p className="text-xs text-stone-500">お手本プレビュー表示のみで使います。採点には使いません。</p>
         <textarea
           id="target-text"
           value={targetText}
           onChange={(e) => setTargetText(e.target.value)}
           rows={3}
           placeholder={"例：二次方程式の解の公式"}
-          className="w-full resize-y rounded-xl border border-zinc-700 bg-zinc-950/80 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none focus:ring-1 focus:ring-sky-600"
+          className="w-full resize-y rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
           disabled={isAnalyzing}
           autoComplete="off"
         />
-        {!hasPracticeText ? <p className="text-xs text-zinc-500">入力しなくても解析できます。</p> : null}
+        {!hasPracticeText ? <p className="text-xs text-stone-500">入力しなくても読みやすさを確認できます。</p> : null}
       </div>
 
       {hasPracticeText ? (
-        <div className="space-y-2">
-        <p className="text-sm font-medium text-zinc-200">お手本プレビュー</p>
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-zinc-800 bg-[rgb(44,82,48)]">
+        <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+        <p className="text-sm font-medium text-stone-800">お手本プレビュー</p>
+        <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-stone-300 bg-[rgb(44,82,48)]">
           {referencePreviewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={referencePreviewUrl} alt="お手本プレビュー" className="h-full w-full object-contain" />
@@ -463,7 +480,7 @@ export function CameraCapture() {
           )}
           {isReferencePreviewLoading ? (
             <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <span className="inline-flex items-center gap-2 rounded-full bg-zinc-900/60 px-3 py-1 text-xs text-zinc-100">
+              <span className="inline-flex items-center gap-2 rounded-full bg-stone-900/65 px-3 py-1 text-xs text-stone-100">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 生成中…
               </span>
@@ -471,7 +488,7 @@ export function CameraCapture() {
           ) : null}
         </div>
         {referencePreviewError ? (
-          <p className="text-xs text-zinc-500">お手本プレビューを作成できませんでした。</p>
+          <p className="text-xs text-orange-700">お手本プレビューを作成できませんでした。</p>
         ) : null}
         </div>
       ) : null}
@@ -484,8 +501,8 @@ export function CameraCapture() {
         onChange={onFileChange}
       />
 
-      <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3 shadow-lg sm:p-4">
-        <div className="relative min-h-[200px] overflow-hidden rounded-xl border border-zinc-800 bg-black sm:min-h-[240px]">
+      <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-3 shadow-sm sm:p-4">
+        <div className="relative min-h-[200px] overflow-hidden rounded-lg border border-stone-300 bg-black sm:min-h-[240px]">
           {/* プレビュー（ファイル / カメラ） */}
           {previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -506,8 +523,8 @@ export function CameraCapture() {
 
           {!previewUrl && !streamActive ? (
             <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 px-6 py-12 text-center sm:min-h-[240px]">
-              <Camera className="h-12 w-12 text-zinc-600" aria-hidden />
-              <p className="max-w-sm text-sm text-zinc-400">
+              <Camera className="h-12 w-12 text-stone-500" aria-hidden />
+              <p className="max-w-sm text-sm text-stone-300">
                 まず写真ライブラリから選ぶか、下のボタンでカメラを開始してください。
               </p>
             </div>
@@ -561,7 +578,7 @@ export function CameraCapture() {
             </svg>
           )}
           {result?.perspective_corrected && (
-            <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-zinc-950/70 px-2 py-1 text-[11px] text-zinc-300">
+            <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-stone-900/70 px-2 py-1 text-[11px] text-stone-100">
               台形補正後の座標で解析したため、元画像上のオーバーレイ表示は省略しています。
             </div>
           )}
@@ -572,9 +589,9 @@ export function CameraCapture() {
               role="status"
               aria-live="polite"
             >
-              <Loader2 className="h-10 w-10 animate-spin text-sky-400" aria-hidden />
-              <span className="text-sm font-medium text-zinc-100">解析しています…</span>
-              <span className="max-w-xs px-4 text-center text-xs text-zinc-400">
+              <Loader2 className="h-10 w-10 animate-spin text-teal-300" aria-hidden />
+              <span className="text-sm font-medium text-stone-100">読みやすさを確認しています…</span>
+              <span className="max-w-xs px-4 text-center text-xs text-stone-300">
                 画像処理はサーバー側で実行しています。少々お待ちください。
               </span>
             </div>
@@ -588,7 +605,7 @@ export function CameraCapture() {
             type="button"
             onClick={onPickFile}
             disabled={isAnalyzing}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-zinc-800 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50 sm:flex-1"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-stone-100 px-4 py-3 text-sm font-medium text-stone-800 transition hover:bg-stone-200 disabled:opacity-50 sm:flex-1"
           >
             <ImagePlus className="h-4 w-4 shrink-0" />
             画像を選ぶ
@@ -597,7 +614,7 @@ export function CameraCapture() {
             type="button"
             onClick={startCamera}
             disabled={isStarting || isAnalyzing}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50 sm:flex-1"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-teal-600 disabled:opacity-50 sm:flex-1"
           >
             {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4 shrink-0" />}
             カメラで撮影
@@ -606,7 +623,7 @@ export function CameraCapture() {
             type="button"
             onClick={stopCamera}
             disabled={!streamActive || isAnalyzing}
-            className="min-h-11 rounded-xl border border-zinc-600 px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+            className="min-h-12 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-40"
           >
             カメラ停止
           </button>
@@ -616,52 +633,50 @@ export function CameraCapture() {
           type="button"
           onClick={runAnalysis}
           disabled={isAnalyzing || !canAnalyze}
-          className="flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg transition hover:bg-sky-500 disabled:opacity-50"
+          className="flex min-h-[3.2rem] w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3.5 text-base font-semibold text-white shadow-sm transition hover:bg-teal-600 disabled:opacity-50"
         >
           {isAnalyzing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Scan className="h-5 w-5" />}
-          解析する
+          読みやすさを確認する
         </button>
 
-        <button
-          type="button"
-          onClick={resetSession}
-          disabled={isAnalyzing}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 py-3 text-sm text-zinc-300 hover:bg-zinc-800/80 disabled:opacity-40"
-        >
-          <RefreshCw className="h-4 w-4" />
-          別の写真でもう一度試す
-        </button>
+        {!result ? (
+          <button
+            type="button"
+            onClick={resetForRetry}
+            disabled={isAnalyzing}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 py-3 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-40"
+          >
+            <RefreshCw className="h-4 w-4" />
+            もう一度書いてみる
+          </button>
+        ) : null}
       </div>
 
-      <p className="text-center text-[11px] text-zinc-600 sm:text-left">
-        接続先 API: <span className="font-mono text-zinc-500">{apiBase.value}</span>
-      </p>
-
       {permissionDenied && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+        <p className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           カメラへのアクセスがブロックされています。ブラウザの設定からこのサイトのアクセスを許可してください。
         </p>
       )}
 
       {error && (
-        <p className="flex items-start gap-2 rounded-lg border border-red-900/40 bg-red-950/25 px-3 py-2 text-sm text-red-200">
+        <p className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           {error}
         </p>
       )}
 
       {error && manualRetryAfterError && lastAnalysisImage && !result ? (
-        <div className="space-y-3 rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 text-sm text-amber-50">
-          <label htmlFor="manual-retry-text" className="block text-xs font-medium text-amber-100/90">
-            OCR できなかった場合の手入力
+        <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-stone-800">
+          <label htmlFor="manual-retry-text" className="block text-xs font-medium text-stone-700">
+            書かれている内容の確認（手入力）
           </label>
           <textarea
             id="manual-retry-text"
             value={recognizedTextDraft}
             onChange={(e) => setRecognizedTextDraft(e.target.value)}
             rows={3}
-            className="w-full resize-y rounded-lg border border-amber-800/60 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            className="w-full resize-y rounded-lg border border-orange-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
             placeholder="板書に書かれている文字列を入力"
             disabled={isAnalyzing}
           />
@@ -669,7 +684,7 @@ export function CameraCapture() {
             type="button"
             onClick={rerunWithCorrection}
             disabled={isAnalyzing || !canRerunWithCorrection}
-            className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-45"
+            className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-orange-400 disabled:opacity-45"
           >
             {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             入力文字で解析
@@ -678,21 +693,30 @@ export function CameraCapture() {
       ) : null}
 
       {result && summaryPct !== null && (
-        <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
+        <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">今回の読みやすさ</h2>
-            <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
+            <h2 className="text-lg font-semibold tracking-tight text-stone-800">今回の読みやすさ</h2>
+            <p className="text-3xl font-bold tabular-nums text-teal-700">{summaryPct}点</p>
           </div>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-stone-600">
             主評価は可読性・行の整い・文字サイズ・字間行間・線の安定感です。
             撮影品質と OCR 文字列は補助情報として扱います。
           </p>
 
+          <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+            <h3 className="text-sm font-semibold text-emerald-900">よかったところ</h3>
+            <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-stone-700">
+              {positives.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          </div>
+
           {result.mode === "ocr" || result.mode === "manual" ? (
-            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-sm text-zinc-300">
+            <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
               <div className="space-y-1">
                 <p>
-                  認識モード:{" "}
+                  内容確認モード:{" "}
                   {result.mode === "manual" ? "手動修正" : `自動認識（${result.ocr_engine ?? "unknown"}）`}
                 </p>
                 {result.mode === "ocr" ? (
@@ -704,27 +728,27 @@ export function CameraCapture() {
                   <p>修正した文字列で再解析済みです。</p>
                 )}
                 {result.mode === "ocr" && result.ocr_needs_review ? (
-                  <p className="text-amber-300">OCR 文字列は未確定です。内容を確認して必要なら修正してください。</p>
+                  <p className="text-orange-700">OCR 文字列は未確定です。内容を確認して必要なら修正してください。</p>
                 ) : null}
               </div>
               <div className="space-y-2">
-                <label htmlFor="recognized-text" className="block text-xs font-medium text-zinc-400">
-                  解析に使う文字列
+                <label htmlFor="recognized-text" className="block text-xs font-medium text-stone-600">
+                  書かれている内容（必要なら修正）
                 </label>
                 <textarea
                   id="recognized-text"
                   value={recognizedTextDraft}
                   onChange={(e) => setRecognizedTextDraft(e.target.value)}
                   rows={3}
-                  className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none focus:ring-1 focus:ring-sky-600"
-                  placeholder="OCR 結果が違う場合はここで修正"
+                  className="w-full resize-y rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
+                  placeholder="認識結果が違う場合はここで修正"
                   disabled={isAnalyzing}
                 />
                 <button
                   type="button"
                   onClick={rerunWithCorrection}
                   disabled={isAnalyzing || !canRerunWithCorrection}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-45"
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-600 disabled:opacity-45"
                 >
                   {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   修正して再解析
@@ -734,12 +758,12 @@ export function CameraCapture() {
           ) : null}
 
           {result.reference_comparison && (
-            <div className="rounded-xl border border-sky-900/40 bg-sky-950/20 p-4">
-              <p className="mb-2 text-xs font-medium text-sky-200/90">参考: 認識文字のチョーク体参照との一致</p>
-              <p className="font-mono text-2xl tabular-nums text-sky-300">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+              <p className="mb-2 text-xs font-medium text-stone-600">参考: 認識文字とチョーク体参照の一致</p>
+              <p className="font-mono text-xl tabular-nums text-stone-700">
                 {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
               </p>
-              <p className="mt-2 text-[11px] text-zinc-500">
+              <p className="mt-2 text-[11px] text-stone-500">
                 手書きとフォントの差で低めに出る場合があります（総合評価には使いません）。{" "}
                 IoU {(result.reference_comparison.iou * 100).toFixed(0)}% / Dice{" "}
                 {(result.reference_comparison.dice_coefficient * 100).toFixed(0)}% / 画素一致{" "}
@@ -753,34 +777,52 @@ export function CameraCapture() {
             ).map((key) => (
               <div
                 key={key}
-                className="rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-3 text-left"
+                className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-3 text-left"
               >
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                <dt className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
                   {scoreLabel(key)}
                 </dt>
-                <dd className="mt-1 font-mono text-2xl tabular-nums text-zinc-50">
+                <dd className="mt-1 font-mono text-2xl tabular-nums text-stone-800">
                   {(result.scores[key] * 100).toFixed(0)}%
                 </dd>
               </div>
             ))}
           </dl>
 
-          <div className="space-y-2 rounded-xl border border-emerald-900/30 bg-emerald-950/20 p-4">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-100">
-              <Lightbulb className="h-4 w-4 text-emerald-400" aria-hidden />
-              次に意識すること（文字）
+          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+              <Lightbulb className="h-4 w-4 text-amber-600" aria-hidden />
+              次に意識すること
             </h3>
-            <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-zinc-300">
+            <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-stone-700">
               {hints.map((line, i) => (
                 <li key={i}>{line}</li>
               ))}
             </ul>
           </div>
 
+          <button
+            type="button"
+            onClick={resetForRetry}
+            disabled={isAnalyzing}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-teal-700 bg-teal-700 py-3 text-sm font-semibold text-white hover:bg-teal-600 disabled:opacity-40"
+          >
+            <RefreshCw className="h-4 w-4" />
+            もう一度書いてみる
+          </button>
+          <button
+            type="button"
+            onClick={resetForNewPractice}
+            disabled={isAnalyzing}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white py-3 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-40"
+          >
+            新しい文章で練習する
+          </button>
+
           {captureHints.length > 0 ? (
-            <div className="space-y-2 rounded-xl border border-amber-900/30 bg-amber-950/20 p-4">
-              <h3 className="text-sm font-semibold text-amber-100">撮影・認識の確認（補助情報）</h3>
-              <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-zinc-300">
+            <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50 p-4">
+              <h3 className="text-sm font-semibold text-orange-900">撮影・認識の確認（補助情報）</h3>
+              <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-stone-700">
                 {captureHints.map((line, i) => (
                   <li key={i}>{line}</li>
                 ))}
@@ -789,9 +831,9 @@ export function CameraCapture() {
           ) : null}
 
           {result.notes.length > 0 && (
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-4">
-              <p className="mb-2 text-xs font-medium text-zinc-500">システムメッセージ</p>
-              <ul className="space-y-1.5 text-sm text-zinc-400">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+              <p className="mb-2 text-xs font-medium text-stone-500">補足メモ</p>
+              <ul className="space-y-1.5 text-sm text-stone-600">
                 {result.notes.map((n, i) => (
                   <li key={i}>{n}</li>
                 ))}

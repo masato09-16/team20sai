@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  @apply min-h-screen bg-zinc-950 text-zinc-100 antialiased;
+  @apply min-h-screen bg-stone-100 text-stone-800 antialiased;
+  background-image: linear-gradient(to bottom, #f8f7f2, #f4f3ee 35%, #f3f2ed);
 }
