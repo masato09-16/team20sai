@@ -16,7 +16,15 @@ import {
 import type { PracticeAttempt, PracticeSession } from "@/lib/storage/types";
 import { formatDateTime } from "@/lib/ui/format";
 
-function AttemptRow({ attempt, onDelete }: { attempt: PracticeAttempt; onDelete: (attemptId: string) => void }) {
+function AttemptRow({
+  attempt,
+  orderLabel,
+  onDelete,
+}: {
+  attempt: PracticeAttempt;
+  orderLabel: string;
+  onDelete: (attemptId: string) => void;
+}) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     const next = URL.createObjectURL(attempt.imageBlob);
@@ -41,7 +49,9 @@ function AttemptRow({ attempt, onDelete }: { attempt: PracticeAttempt; onDelete:
           ) : null}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-stone-800">{formatDateTime(attempt.createdAt)}</p>
+          <p className="text-sm font-medium text-stone-800">
+            {orderLabel}・{formatDateTime(attempt.createdAt)}
+          </p>
           <p className="text-xs text-stone-500">{score}</p>
         </div>
       </div>
@@ -110,7 +120,7 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
   );
 
   const onDeleteSession = useCallback(async () => {
-    if (!window.confirm("この練習セッションを削除します。よろしいですか？")) return;
+    if (!window.confirm("この練習を削除します。よろしいですか？")) return;
     try {
       await deleteSession(sessionId);
       router.push("/album");
@@ -201,14 +211,18 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
           className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm text-orange-700 hover:bg-orange-50"
         >
           <Trash2 className="h-4 w-4" />
-          セッションを削除
+          練習を削除
         </button>
       </div>
 
       <ul className="space-y-2">
-        {attempts.map((attempt) => (
+        {attempts.map((attempt, index) => (
           <li key={attempt.id}>
-            <AttemptRow attempt={attempt} onDelete={onDeleteAttempt} />
+            <AttemptRow
+              attempt={attempt}
+              orderLabel={index === 0 ? "1回目" : `${index + 1}回目（書き直し後）`}
+              onDelete={onDeleteAttempt}
+            />
           </li>
         ))}
       </ul>

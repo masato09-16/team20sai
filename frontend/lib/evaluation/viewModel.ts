@@ -78,7 +78,7 @@ export function captureAndRecognitionHints(result: BanshoAnalysisResult): string
     hints.push("撮影品質が低めです。暗さ・ピント・斜め撮影を整えると評価の信頼性が上がります。");
   }
   if (result.ocr_needs_review) {
-    hints.push("OCR 文字列は未確定です。必要なら内容を修正して再解析してください。");
+    hints.push("OCR 文字列は未確定です。必要なら内容を修正して確認し直してください。");
   }
   return hints;
 }
@@ -97,7 +97,7 @@ export function compareMessages(before: AnalysisScores, after: AnalysisScores): 
     .sort((a, b) => b.delta - a.delta);
 
   if (improved.length === 0) {
-    return ["大きな差はまだ見えません。次は1つの項目に絞って書き直してみましょう。"];
+    return ["今回は大きな変化は見られませんでした。次は「行を揃えること」に絞って書いてみましょう。"];
   }
   return improved.slice(0, 2).map((r) => `前回より${r.label}が良くなっています。`);
 }

@@ -6,6 +6,7 @@ import { AlertCircle, Camera, CheckCircle2, ImagePlus, Loader2, Save, Video, Vid
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
 import { prepareImageForStorageAndAnalysis } from "@/lib/image/prepareImage";
+import { PracticeSteps } from "@/components/practice/PracticeSteps";
 import {
   createAttempt,
   createSessionWithAttempt,
@@ -207,27 +208,23 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
   }, [initialSessionId, memo, pendingImage, router]);
 
+  const resetPendingOnly = useCallback(() => {
+    setPendingImage(null);
+    setPreview(null);
+    setError(null);
+  }, [setPreview]);
+
+  const hasSelectedImage = Boolean(pendingImage);
+
   return (
     <section className="space-y-5">
+      <PracticeSteps current={1} />
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">書いた板書を撮影してください</h1>
-        <p className="text-sm text-stone-600">保存した写真をあとで比べながら、板書を振り返れます。</p>
+        <h1 className="text-2xl font-semibold text-stone-800">{hasSelectedImage ? "この写真で振り返りますか？" : "板書を撮影する"}</h1>
+        <p className="text-sm text-stone-600">
+          {hasSelectedImage ? "写真を確認して、今回の振り返りへ進みましょう。" : "書いた黒板文字の写真を選んでください。"}
+        </p>
       </header>
-
-      <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-        <label htmlFor="memo" className="block text-sm font-medium text-stone-800">
-          板書の内容メモ（任意）
-        </label>
-        <textarea
-          id="memo"
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          rows={2}
-          className="w-full resize-y rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
-          placeholder="例：二次方程式の解の公式"
-          disabled={isBusy || isStartingCamera}
-        />
-      </div>
 
       <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <input
@@ -266,7 +263,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-stone-100 px-4 py-3 text-sm font-medium text-stone-800 hover:bg-stone-200 disabled:opacity-50"
           >
             <ImagePlus className="h-4 w-4" />
-            画像を選ぶ
+            端末の写真から選ぶ
           </button>
           <button
             type="button"
@@ -281,7 +278,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
             ) : (
               <Video className="h-4 w-4" />
             )}
-            {isStartingCamera ? "カメラ準備中…" : cameraActive ? "カメラ停止" : "カメラで撮影"}
+            {isStartingCamera ? "カメラ準備中…" : cameraActive ? "カメラ停止" : "カメラで撮影する"}
           </button>
           <button
             type="button"
@@ -290,7 +287,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
           >
             <CheckCircle2 className="h-4 w-4" />
-            この画像で確認へ
+            この写真を使う
           </button>
         </div>
 
@@ -301,6 +298,27 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           </div>
         ) : null}
 
+        {pendingImage ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={resetPendingOnly}
+              disabled={isBusy || isStartingCamera}
+              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+            >
+              撮り直す
+            </button>
+            <button
+              type="button"
+              onClick={onPickFile}
+              disabled={isBusy || isStartingCamera}
+              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+            >
+              別の写真を選ぶ
+            </button>
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={saveAndAnalyze}
@@ -308,8 +326,24 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           className="inline-flex min-h-[3.2rem] w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-teal-600 disabled:opacity-50"
         >
           {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-          保存して振り返る
+          この写真で振り返る
         </button>
+        {pendingImage ? <p className="text-xs text-stone-500">写真と振り返り結果は練習記録に保存されます。</p> : null}
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="memo" className="block text-sm font-medium text-stone-700">
+          板書の内容メモ（任意）
+        </label>
+        <textarea
+          id="memo"
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          rows={2}
+          className="w-full resize-y rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
+          placeholder="例：二次方程式の解の公式"
+          disabled={isBusy || isStartingCamera}
+        />
       </div>
 
       {permissionDenied ? (

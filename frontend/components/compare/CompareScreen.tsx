@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Camera } from "lucide-react";
 
+import { PracticeSteps } from "@/components/practice/PracticeSteps";
 import { compareMessages, displayScoreItems } from "@/lib/evaluation/viewModel";
 import { listAttemptsBySession } from "@/lib/storage/repository";
 import type { PracticeAttempt } from "@/lib/storage/types";
@@ -76,14 +77,15 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
   if (attempts.length < 2) {
     return (
       <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-        <h1 className="text-xl font-semibold text-stone-800">書き直し比較</h1>
+        <PracticeSteps current={3} canCompare={false} />
+        <h1 className="text-xl font-semibold text-stone-800">書き直しで変わったところ</h1>
         <p className="text-sm text-stone-600">比較できる記録がまだありません。2枚以上保存すると比較できます。</p>
         <Link
           href={`/practice/new?sessionId=${sessionId}`}
           className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
         >
           <Camera className="h-4 w-4" />
-          同じ内容でもう一度書く
+          もう一度練習する
         </Link>
       </section>
     );
@@ -94,9 +96,10 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
 
   return (
     <section className="space-y-4">
+      <PracticeSteps current={3} canCompare />
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">書き直し比較</h1>
-        <p className="text-sm text-stone-600">前回との差を確認して、次の練習につなげましょう。</p>
+        <h1 className="text-2xl font-semibold text-stone-800">書き直しで変わったところ</h1>
+        <p className="text-sm text-stone-600">前回と比べて、どこが整ってきたかを確認できます。</p>
       </header>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -115,7 +118,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           </select>
         </label>
         <label className="space-y-1 text-sm text-stone-700">
-          比較先
+          書き直し後
           <select
             value={rightId}
             onChange={(e) => setRightId(e.target.value)}
@@ -141,7 +144,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           </div>
         </div>
         <div className="rounded-lg border border-stone-200 bg-white p-3">
-          <p className="mb-2 text-sm font-medium text-stone-700">比較先</p>
+          <p className="mb-2 text-sm font-medium text-stone-700">書き直し後</p>
           <div className="overflow-hidden rounded-md border border-stone-200 bg-black">
             {rightUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -150,6 +153,12 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       </div>
+
+      {leftId === rightId ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          同じ写真を選択中です。書き直し前後を比較するには、別の回を選んでください。
+        </p>
+      ) : null}
 
       {messages.length > 0 ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
@@ -185,6 +194,13 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       ) : null}
+
+      <Link
+        href={`/practice/new?sessionId=${sessionId}`}
+        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
+      >
+        もう一度練習する
+      </Link>
     </section>
   );
 }

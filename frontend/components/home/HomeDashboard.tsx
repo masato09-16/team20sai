@@ -44,32 +44,47 @@ export function HomeDashboard() {
   }, []);
 
   const hasRows = rows.length > 0;
-  const titleText = useMemo(
-    () => (hasRows ? "前回の続きから練習できます" : "まずは1回、板書を撮影して振り返りましょう"),
-    [hasRows],
-  );
+  const latest = useMemo(() => rows[0] ?? null, [rows]);
 
   return (
-    <section className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800 sm:text-3xl">板書練習ノート</h1>
-        <p className="text-sm text-stone-600">{titleText}</p>
+    <section className="space-y-6">
+      <header className="space-y-3">
+        <p className="text-sm font-semibold tracking-wide text-teal-800">板書練習ノート</p>
+        <h1 className="text-2xl font-semibold text-stone-800 sm:text-3xl">
+          授業で伝わる板書を、
+          <br />
+          書いて、撮って、振り返る。
+        </h1>
+        <p className="text-sm text-stone-600">
+          黒板の写真から、読みやすさや整え方を確認し、書き直した変化を見比べられます。
+        </p>
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700">
+          1 撮影する → 2 振り返る → 3 書き直して比べる
+        </div>
       </header>
 
-      <Link
-        href="/practice/new"
-        className="flex min-h-14 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-teal-600"
-      >
-        <Camera className="h-5 w-5" />
-        板書を撮影する
-      </Link>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Link
+          href={latest ? `/practice/new?sessionId=${latest.session.id}` : "/practice/new"}
+          className="flex min-h-14 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-teal-600"
+        >
+          <Camera className="h-5 w-5" />
+          {latest ? "前回の続きを練習する" : "板書を撮影して振り返る"}
+        </Link>
+        <Link
+          href={latest ? `/album/${latest.session.id}` : "/album"}
+          className="flex min-h-14 items-center justify-center rounded-lg border border-stone-300 bg-white px-4 py-3 text-base font-semibold text-stone-700 transition hover:bg-stone-100"
+        >
+          {latest ? "前回の振り返りを見る" : "保存した練習を見る"}
+        </Link>
+      </div>
 
       <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-stone-800">最近の練習</h2>
         {loading ? <p className="mt-3 text-sm text-stone-500">読み込み中…</p> : null}
         {!loading && loadError ? <p className="mt-3 text-sm text-orange-700">{loadError}</p> : null}
         {!loading && !loadError && !hasRows ? (
-          <p className="mt-3 text-sm text-stone-500">まだ保存された練習はありません。</p>
+          <p className="mt-3 text-sm text-stone-500">まだ記録はありません。まずは写真を撮って振り返ってみましょう。</p>
         ) : null}
         {!loading && !loadError && hasRows ? (
           <ul className="mt-3 space-y-2">

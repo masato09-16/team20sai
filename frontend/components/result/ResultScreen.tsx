@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, RefreshCw, Trash2 } from "lucide-react";
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
+import { PracticeSteps } from "@/components/practice/PracticeSteps";
 import {
   captureAndRecognitionHints,
   compareMessages,
@@ -95,6 +96,8 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
     beforeAttempt?.analysisStatus === "completed" && beforeAttempt.analysisResult && result
       ? compareMessages(beforeAttempt.analysisResult.scores, result.scores).slice(0, 1)
       : [];
+  const comparableCount = allAttempts.filter((a) => a.analysisStatus === "completed" && a.analysisResult).length;
+  const canCompare = comparableCount >= 2;
 
   const rerunAnalysis = useCallback(
     async (withCorrection: boolean) => {
@@ -172,6 +175,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
 
   return (
     <section className="space-y-5">
+      <PracticeSteps current={2} canCompare={canCompare} />
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold text-stone-800">今回の振り返り</h1>
         <p className="text-sm text-stone-600">{formatDateTime(attempt.createdAt)}</p>
@@ -186,17 +190,25 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
 
       {attempt.analysisStatus === "error" ? (
         <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
-          <p>解析に失敗しました。画像は保存されています。</p>
-          <p>{attempt.analysisError || "時間をおいて再解析してください。"}</p>
-          <button
-            type="button"
-            onClick={() => void rerunAnalysis(false)}
-            disabled={working}
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 font-semibold text-white hover:bg-teal-600 disabled:opacity-50"
-          >
-            {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            再解析する
-          </button>
+          <p>今回は振り返りの作成に失敗しました。写真は保存されています。</p>
+          <p>{attempt.analysisError || "時間をおいて、もう一度確認し直してください。"}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void rerunAnalysis(false)}
+              disabled={working}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 font-semibold text-white hover:bg-teal-600 disabled:opacity-50"
+            >
+              {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              もう一度確認し直す
+            </button>
+            <Link
+              href={`/practice/new?sessionId=${session.id}`}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
+            >
+              別の写真で振り返る
+            </Link>
+          </div>
         </div>
       ) : null}
 
@@ -228,6 +240,14 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
             </ul>
           </div>
 
+          <Link
+            href={`/practice/new?sessionId=${session.id}`}
+            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
+          >
+            同じ板書をもう一度書く
+          </Link>
+
+          <h3 className="text-sm font-semibold text-stone-700">詳しい評価</h3>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {displayScoreItems(result.scores).map((item) => (
               <div key={item.key} className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
@@ -242,9 +262,9 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
           </div>
 
           <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
-            <h3 className="text-sm font-semibold text-stone-700">書かれている内容の確認（補助）</h3>
+            <h3 className="text-sm font-semibold text-stone-700">読み取った文字を確認する（補助）</h3>
             <p className="text-xs text-stone-500">
-              OCR 結果が違う場合は修正して再解析できます。主評価は文字の見やすさです。
+              OCR 結果が違う場合は修正して確認し直せます。主評価は文字の見やすさです。
             </p>
             <textarea
               value={correctedText}
@@ -261,7 +281,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
               className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
             >
               {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              修正して再解析
+              修正して確認し直す
             </button>
           </div>
 
@@ -285,13 +305,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <Link
-          href={`/practice/new?sessionId=${session.id}`}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
-        >
-          同じ内容でもう一度書く
-        </Link>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Link
           href={`/album/${session.id}`}
           className="inline-flex min-h-11 items-center justify-center rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"

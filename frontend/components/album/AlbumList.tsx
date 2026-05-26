@@ -94,7 +94,7 @@ export function AlbumList() {
     <section className="space-y-4">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold text-stone-800">練習アルバム</h1>
-        <p className="text-sm text-stone-600">保存した板書を見返し、上達の流れを確認できます。</p>
+        <p className="text-sm text-stone-600">保存した板書を見返して、書き直しの変化を確認できます。</p>
       </header>
 
       {loading ? <p className="text-sm text-stone-500">読み込み中…</p> : null}
