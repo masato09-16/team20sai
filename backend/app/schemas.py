@@ -73,6 +73,8 @@ class BanshoAnalysisResult(BaseModel):
     recognized_text: str | None = None
     ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     ocr_engine: str | None = None
+    ocr_needs_review: bool = False
+    ocr_issue: str | None = None
     perspective_corrected: bool = False
 
 

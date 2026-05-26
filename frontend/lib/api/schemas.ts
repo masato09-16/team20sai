@@ -58,6 +58,8 @@ export const banshoAnalysisResultSchema = z.object({
   recognized_text: z.string().nullable().optional(),
   ocr_confidence: z.number().min(0).max(1).nullable().optional(),
   ocr_engine: z.string().nullable().optional(),
+  ocr_needs_review: z.boolean().default(false),
+  ocr_issue: z.string().nullable().optional(),
   perspective_corrected: z.boolean().default(false),
 });
 

@@ -16,6 +16,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+const MAIN_SCORE_WEIGHTS = {
+  readability: 0.35,
+  line_alignment: 0.25,
+  size_consistency: 0.2,
+  spacing_balance: 0.1,
+  stroke_quality: 0.1,
+} as const;
+
 function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
   const map: Record<keyof BanshoAnalysisResult["scores"], string> = {
     readability: "可読性",
@@ -49,25 +57,32 @@ function improvementHints(result: BanshoAnalysisResult): string[] {
   if (scores.stroke_quality < t) {
     hints.push("線が薄い・かすれる場合は、チョーク圧や撮影距離を調整すると線の安定感が上がります。");
   }
-  if (scores.visibility < t) {
-    hints.push("撮影品質が低めです。暗さ・ピント・斜め撮影を改善すると評価の安定性が上がります。");
-  }
-  if (result.mode === "ocr" && typeof result.ocr_confidence === "number" && result.ocr_confidence < 0.6) {
-    hints.push("OCR の信頼度が低めです。文字列が違う場合は修正して再解析してください（主評価は字形中心です）。");
-  }
   if (hints.length === 0) {
     hints.push("バランスが良いです。この調子で書き続けましょう。");
   }
   return hints;
 }
 
+function captureAndRecognitionHints(result: BanshoAnalysisResult): string[] {
+  const hints: string[] = [];
+  if (result.scores.visibility < 0.72) {
+    hints.push("撮影品質が低めです。暗さ・ピント・斜め撮影を整えると、評価の信頼性が上がります。");
+  }
+  if (result.ocr_needs_review) {
+    hints.push("OCR 文字列は未確定です。必要なら文字列を修正して再解析してください。");
+  } else if (result.mode === "ocr" && typeof result.ocr_confidence === "number" && result.ocr_confidence < 0.6) {
+    hints.push("OCR 信頼度が低めです。文字列が違う場合は修正して再解析してください。");
+  }
+  return hints;
+}
+
 function overallScore(scores: BanshoAnalysisResult["scores"]): number {
   return (
-    scores.readability * 0.35 +
-    scores.line_alignment * 0.25 +
-    scores.size_consistency * 0.2 +
-    scores.spacing_balance * 0.1 +
-    scores.stroke_quality * 0.1
+    scores.readability * MAIN_SCORE_WEIGHTS.readability +
+    scores.line_alignment * MAIN_SCORE_WEIGHTS.line_alignment +
+    scores.size_consistency * MAIN_SCORE_WEIGHTS.size_consistency +
+    scores.spacing_balance * MAIN_SCORE_WEIGHTS.spacing_balance +
+    scores.stroke_quality * MAIN_SCORE_WEIGHTS.stroke_quality
   );
 }
 
@@ -400,6 +415,7 @@ export function CameraCapture() {
   const hasPracticeText = targetText.trim().length > 0;
   const canAnalyze = !!(selectedFile || streamActive);
   const hints = result ? improvementHints(result) : [];
+  const captureHints = result ? captureAndRecognitionHints(result) : [];
   const summaryPct = result ? Math.round(overallScore(result.scores) * 100) : null;
   const resultText = result?.recognized_text?.trim() ?? "";
   const canRerunWithCorrection =
@@ -664,7 +680,7 @@ export function CameraCapture() {
       {result && summaryPct !== null && (
         <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">総合評価</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-100">今回の読みやすさ</h2>
             <p className="text-3xl font-bold tabular-nums text-sky-400">{summaryPct}点</p>
           </div>
           <p className="text-xs text-zinc-500">
@@ -687,6 +703,9 @@ export function CameraCapture() {
                 ) : (
                   <p>修正した文字列で再解析済みです。</p>
                 )}
+                {result.mode === "ocr" && result.ocr_needs_review ? (
+                  <p className="text-amber-300">OCR 文字列は未確定です。内容を確認して必要なら修正してください。</p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <label htmlFor="recognized-text" className="block text-xs font-medium text-zinc-400">
@@ -749,7 +768,7 @@ export function CameraCapture() {
           <div className="space-y-2 rounded-xl border border-emerald-900/30 bg-emerald-950/20 p-4">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-100">
               <Lightbulb className="h-4 w-4 text-emerald-400" aria-hidden />
-              改善ポイント
+              次に意識すること（文字）
             </h3>
             <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-zinc-300">
               {hints.map((line, i) => (
@@ -757,6 +776,17 @@ export function CameraCapture() {
               ))}
             </ul>
           </div>
+
+          {captureHints.length > 0 ? (
+            <div className="space-y-2 rounded-xl border border-amber-900/30 bg-amber-950/20 p-4">
+              <h3 className="text-sm font-semibold text-amber-100">撮影・認識の確認（補助情報）</h3>
+              <ul className="list-inside list-disc space-y-2 text-sm leading-relaxed text-zinc-300">
+                {captureHints.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {result.notes.length > 0 && (
             <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-4">

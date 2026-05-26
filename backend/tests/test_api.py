@@ -105,7 +105,7 @@ def test_reference_preview_out_of_range_returns_422(client: TestClient) -> None:
     assert res2.status_code == 422
 
 
-def test_analyze_returns_422_when_ocr_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _unavailable(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -120,12 +120,15 @@ def test_analyze_returns_422_when_ocr_unavailable(client: TestClient, monkeypatc
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _unavailable)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    detail = res.json().get("detail", "")
-    assert "OCR エンジン" in detail and ("未導入" in detail or "未設定" in detail)
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_unavailable"
+    assert body.get("reference_comparison") is None
+    assert body.get("recognized_text") in {None, ""}
 
 
-def test_analyze_returns_422_when_ocr_init_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_init_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _init_failed(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -140,11 +143,13 @@ def test_analyze_returns_422_when_ocr_init_failed(client: TestClient, monkeypatc
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _init_failed)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    assert "初期化" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_init_failed"
 
 
-def test_analyze_returns_422_when_ocr_runtime_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_runtime_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _runtime_failed(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -159,8 +164,10 @@ def test_analyze_returns_422_when_ocr_runtime_failed(client: TestClient, monkeyp
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _runtime_failed)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    assert "OCR 実行中" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_runtime_failed"
 
 
 def test_analyze_rejects_non_image(client: TestClient) -> None:
@@ -296,29 +303,35 @@ def test_analyze_manual_corrected_text_bypasses_ocr(client: TestClient, monkeypa
     assert body.get("reference_comparison") is not None
 
 
-def test_analyze_ocr_mode_returns_422_on_ocr_exception(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_ocr_mode_returns_result_on_ocr_exception(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_image: np.ndarray) -> OCRResult:
         raise RuntimeError("ocr internal error")
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _boom)
     payload = _encode_png_bgr(_synthetic_dense_board())
     res = _post_analyze(client, payload)
-    assert res.status_code == 422
-    assert "OCR 実行中" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "runtime_error"
+    assert body.get("scores", {}).get("readability", 0.0) > 0.1
 
 
-def test_analyze_ocr_mode_returns_422_on_empty_recognition(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_ocr_mode_returns_result_on_empty_recognition(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _empty(_image: np.ndarray) -> OCRResult:
         return OCRResult(text="", lines=[], confidence=0.0, engine="stub-ocr", available=True, notes=[])
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _empty)
     payload = _encode_png_bgr(_synthetic_dense_board())
     res = _post_analyze(client, payload)
-    assert res.status_code == 422
-    assert "文字を認識できませんでした" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "empty_recognition"
+    assert body.get("recognized_text") in {None, ""}
 
 
-def test_analyze_ocr_mode_returns_422_on_low_confidence(
+def test_analyze_ocr_mode_returns_result_on_low_confidence(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _low_conf(_image: np.ndarray) -> OCRResult:
@@ -334,8 +347,12 @@ def test_analyze_ocr_mode_returns_422_on_low_confidence(
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _low_conf)
     payload = _encode_png_bgr(_synthetic_dense_board())
     res = _post_analyze(client, payload)
-    assert res.status_code == 422
-    assert "OCR の信頼度が低い" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("recognized_text") == "低信頼度テキスト"
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "low_confidence"
+    assert body.get("scores", {}).get("readability", 0.0) > 0.1
 
 
 def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -387,6 +404,16 @@ def test_analyze_faint_strokes_lower_stroke_quality(client: TestClient, monkeypa
         crisp["scores"]["stroke_quality"] > faint["scores"]["stroke_quality"] + 0.05
         or crisp["scores"]["readability"] > faint["scores"]["readability"] + 0.05
     )
+
+
+def test_analyze_low_visibility_keeps_main_handwriting_scores(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    res = _post_analyze(client, _encode_png_bgr(_synthetic_low_visibility_neat_board()))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["scores"]["visibility"] < 0.7
+    assert body["scores"]["readability"] > body["scores"]["visibility"]
+    assert isinstance(body.get("notes"), list)
 
 
 def _synthetic_dense_board() -> np.ndarray:
@@ -471,6 +498,13 @@ def _synthetic_faint_board() -> np.ndarray:
     img = cv2.GaussianBlur(img, (5, 5), 1.3)
     speckle = rng.normal(0.0, 15.0, size=img.shape).astype(np.int16)
     return np.clip(img.astype(np.int16) + speckle, 0, 255).astype(np.uint8)
+
+
+def _synthetic_low_visibility_neat_board() -> np.ndarray:
+    img = _synthetic_dense_board().astype(np.float32)
+    img = img * 0.48 + 18.0
+    img = cv2.GaussianBlur(img, (7, 7), 2.0)
+    return np.clip(img, 0, 255).astype(np.uint8)
 
 
 def _chalkboard_base(h: int, w: int) -> np.ndarray:
