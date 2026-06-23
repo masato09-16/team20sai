@@ -1,5 +1,5 @@
 "use client";
-
+import EvaluationRadarChart from "./EvaluationRadarChart";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,7 +35,6 @@ function toMessage(e: unknown): string {
 export function ResultScreen({ sessionId, attemptId }: { sessionId: string; attemptId: string }) {
   const router = useRouter();
   const imageUrlRef = useRef<string | null>(null);
-
   const [session, setSession] = useState<PracticeSession | null>(null);
   const [attempt, setAttempt] = useState<PracticeAttempt | null>(null);
   const [allAttempts, setAllAttempts] = useState<PracticeAttempt[]>([]);
@@ -248,6 +247,20 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
           </Link>
 
           <h3 className="text-sm font-semibold text-stone-700">詳しい評価</h3>
+          
+          <div className="mt-2 mb-4 flex justify-center bg-stone-50 rounded-xl border border-stone-100 p-2">
+            <EvaluationRadarChart 
+              scores={{
+                readability: Math.round((result.scores.readability || 0) * 100),
+                line_alignment: Math.round((result.scores.line_alignment || 0) * 100),
+                spacing_balance: Math.round((result.scores.spacing_balance || 0) * 100),
+                stroke_quality: Math.round((result.scores.stroke_quality || 0) * 100),
+                horizontalness: Math.round((result.scores.horizontalness || 0) * 100),
+                visibility: Math.round((result.scores.visibility || 0) * 100),
+              }} 
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {displayScoreItems(result.scores).map((item) => (
               <div key={item.key} className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
