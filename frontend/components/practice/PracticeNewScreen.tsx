@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Camera, CheckCircle2, ImagePlus, Loader2, Save, Video, VideoOff } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, ImagePlus, Loader2, Save, Video, VideoOff, Folder, FolderPlus } from "lucide-react";
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
 import { prepareImageForStorageAndAnalysis } from "@/lib/image/prepareImage";
@@ -48,9 +48,14 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
-  // トリミング画面用に追加したステート
+  // トリミング画面用
   const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>("board.jpg");
+
+  // ★ アルバム機能用のステートを追加
+  const [albumOptions, setAlbumOptions] = useState<string[]>(["未分類"]);
+  const [selectedAlbum, setSelectedAlbum] = useState("未分類");
+  const [newAlbumName, setNewAlbumName] = useState("");
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -68,11 +73,26 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   useEffect(() => {
     mountedRef.current = true;
     let mounted = true;
+
+    // アルバム一覧をローカルストレージから読み込む
+    const savedAlbums = localStorage.getItem("bansho_albums");
+    if (savedAlbums) {
+      try {
+        setAlbumOptions(JSON.parse(savedAlbums));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     const loadMemo = async () => {
       if (!initialSessionId) return;
       const session = await getSession(initialSessionId);
       if (!mounted) return;
       if (session?.memo) setMemo(session.memo);
+      // セッションに既存のアルバム名があればセットする
+      if (session && (session as any).albumName) {
+        setSelectedAlbum((session as any).albumName);
+      }
     };
     void loadMemo();
     return () => {
@@ -83,11 +103,26 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     };
   }, [initialSessionId, stopCamera]);
 
+  // ★ 新しいアルバムを追加する処理
+  const handleCreateAlbum = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newAlbumName.trim();
+    if (!trimmed) return;
+    if (albumOptions.includes(trimmed)) {
+      alert("そのアルバム名は既に存在します。");
+      return;
+    }
+    const updated = [...albumOptions, trimmed];
+    setAlbumOptions(updated);
+    localStorage.setItem("bansho_albums", JSON.stringify(updated));
+    setSelectedAlbum(trimmed);
+    setNewAlbumName("");
+  };
+
   const onPickFile = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  // ファイルが選ばれたら、まずはトリミング画面に渡す
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -134,7 +169,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
   }, [setPreview, stopCamera]);
 
-  // カメラ撮影した際も、まずはトリミング画面に回す
   const captureFromCamera = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -166,7 +200,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     setRawImageSrc(URL.createObjectURL(blob));
   }, [stopCamera]);
 
-  // トリミング枠の確定ボタンを押したとき
   const handleCropComplete = useCallback((croppedBlob: Blob) => {
     setPendingImage({
       blob: croppedBlob,
@@ -178,7 +211,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     setRawImageSrc(null);
   }, [currentFilename, rawImageSrc, setPreview]);
 
-  // トリミングキャンセル時
   const handleCropCancel = useCallback(() => {
     if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
     setRawImageSrc(null);
@@ -197,8 +229,10 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       const existingSession = initialSessionId ? await getSession(initialSessionId) : null;
       let sessionId: string;
       let attempt: PracticeAttempt;
+      
       if (existingSession) {
         await updateSessionMemo(existingSession.id, memo || null);
+        (existingSession as any).albumName = selectedAlbum;
         sessionId = existingSession.id;
         attempt = await createAttempt({
           sessionId: existingSession.id,
@@ -214,13 +248,38 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           originalFilename: pendingImage.filename,
         });
         sessionId = created.session.id;
+        (created.session as any).albumName = selectedAlbum;
         attempt = created.attempt;
       }
+
+      // 一覧画面と同期させるためにlocalStorageへ保存データを書き込む
+      const savedHistory = JSON.parse(localStorage.getItem("bansho_history") || "[]");
+      const scoreValue = 80; // 初期値
+      const newHistoryItem = {
+        id: sessionId,
+        albumName: selectedAlbum,
+        targetText: memo || "メモ未入力の練習",
+        recognizedText: "",
+        score: scoreValue,
+        imageUrl: "",
+        createdAt: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
+      };
+      localStorage.setItem("bansho_history", JSON.stringify([newHistoryItem, ...savedHistory]));
 
       await setAttemptAnalyzing(attempt.id);
       try {
         const result = await analyzeBoardImage(prepared.blob, pendingImage.filename || "board.jpg");
         await setAttemptCompleted({ attemptId: attempt.id, result, correctedText: null });
+        
+        // 解析完了後にスコアと認識文字を同期
+        const updatedHistory = JSON.parse(localStorage.getItem("bansho_history") || "[]");
+        const found = updatedHistory.find((h: any) => h.id === sessionId);
+        if (found && result.scores) {
+          const v = Object.values(result.scores);
+          found.score = Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100);
+          found.recognizedText = result.recognized_text || "";
+          localStorage.setItem("bansho_history", JSON.stringify(updatedHistory));
+        }
       } catch (analysisErr) {
         await setAttemptError(attempt.id, toUserMessage(analysisErr));
       }
@@ -228,9 +287,9 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     } catch (e) {
       setError(toUserMessage(e));
     } finally {
-      setIsBusy(false);
+      if (mountedRef.current) setIsBusy(false);
     }
-  }, [initialSessionId, memo, pendingImage, router]);
+  }, [initialSessionId, memo, pendingImage, router, selectedAlbum]);
 
   const resetPendingOnly = useCallback(() => {
     setPendingImage(null);
@@ -249,6 +308,52 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           {hasSelectedImage ? "写真を確認して、今回の振り返りへ進みましょう。" : "書いた黒板文字の写真を選んでください。"}
         </p>
       </header>
+
+      {/* ★★★ 自由アルバム作成＆選択UI ★★★ */}
+      <div className="space-y-4 rounded-xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
+        <form onSubmit={handleCreateAlbum} className="space-y-2">
+          <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-stone-700">
+            <FolderPlus className="h-4 w-4 text-teal-700" />
+            新しいアルバムを作成
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="new-album-input"
+              type="text"
+              value={newAlbumName}
+              onChange={(e) => setNewAlbumName(e.target.value)}
+              placeholder="例：1組の数学、テスト対策など"
+              className="flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none"
+              disabled={isBusy}
+            />
+            <button
+              type="submit"
+              disabled={!newAlbumName.trim() || isBusy}
+              className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-teal-600 disabled:opacity-40"
+            >
+              作成
+            </button>
+          </div>
+        </form>
+
+        <div className="space-y-2 pt-2 border-t border-stone-200">
+          <label htmlFor="album-select" className="flex items-center gap-2 text-sm font-medium text-stone-700">
+            <Folder className="h-4 w-4 text-teal-700" />
+            今回の保存先アルバムを選択
+          </label>
+          <select
+            id="album-select"
+            value={selectedAlbum}
+            onChange={(e) => setSelectedAlbum(e.target.value)}
+            className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-800 focus:border-teal-600 focus:outline-none"
+            disabled={isBusy}
+          >
+            {albumOptions.map((album) => (
+              <option key={album} value={album}>{album}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <input
@@ -383,7 +488,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
         </p>
       ) : null}
 
-      {/* トリミング用画像がある場合のみ、モーダルとしてポップアップ表示 */}
       {rawImageSrc && (
         <ImageCropper
           imageSrc={rawImageSrc}
