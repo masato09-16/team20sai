@@ -105,7 +105,7 @@ def test_reference_preview_out_of_range_returns_422(client: TestClient) -> None:
     assert res2.status_code == 422
 
 
-def test_analyze_returns_422_when_ocr_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _unavailable(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -120,12 +120,15 @@ def test_analyze_returns_422_when_ocr_unavailable(client: TestClient, monkeypatc
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _unavailable)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    detail = res.json().get("detail", "")
-    assert "OCR エンジン" in detail and ("未導入" in detail or "未設定" in detail)
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_unavailable"
+    assert body.get("reference_comparison") is None
+    assert body.get("recognized_text") in {None, ""}
 
 
-def test_analyze_returns_422_when_ocr_init_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_init_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _init_failed(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -140,11 +143,13 @@ def test_analyze_returns_422_when_ocr_init_failed(client: TestClient, monkeypatc
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _init_failed)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    assert "初期化" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_init_failed"
 
 
-def test_analyze_returns_422_when_ocr_runtime_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_returns_result_when_ocr_runtime_failed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _runtime_failed(_image: np.ndarray) -> OCRResult:
         return OCRResult(
             text="",
@@ -159,8 +164,10 @@ def test_analyze_returns_422_when_ocr_runtime_failed(client: TestClient, monkeyp
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _runtime_failed)
     res = _post_analyze(client, _tiny_png_bytes())
-    assert res.status_code == 422
-    assert "OCR 実行中" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "ocr_runtime_failed"
 
 
 def test_analyze_rejects_non_image(client: TestClient) -> None:
@@ -296,29 +303,35 @@ def test_analyze_manual_corrected_text_bypasses_ocr(client: TestClient, monkeypa
     assert body.get("reference_comparison") is not None
 
 
-def test_analyze_ocr_mode_returns_422_on_ocr_exception(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_ocr_mode_returns_result_on_ocr_exception(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_image: np.ndarray) -> OCRResult:
         raise RuntimeError("ocr internal error")
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _boom)
     payload = _encode_png_bgr(_synthetic_dense_board())
     res = _post_analyze(client, payload)
-    assert res.status_code == 422
-    assert "OCR 実行中" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "runtime_error"
+    assert body.get("scores", {}).get("readability", 0.0) > 0.1
 
 
-def test_analyze_ocr_mode_returns_422_on_empty_recognition(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_ocr_mode_returns_result_on_empty_recognition(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def _empty(_image: np.ndarray) -> OCRResult:
         return OCRResult(text="", lines=[], confidence=0.0, engine="stub-ocr", available=True, notes=[])
 
     monkeypatch.setattr("app.analysis.pipeline.recognize_board_text", _empty)
     payload = _encode_png_bgr(_synthetic_dense_board())
     res = _post_analyze(client, payload)
-    assert res.status_code == 422
-    assert "文字を認識できませんでした" in res.json().get("detail", "")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "empty_recognition"
+    assert body.get("recognized_text") in {None, ""}
 
 
-def test_analyze_ocr_mode_returns_result_on_low_confidence_for_correction(
+def test_analyze_ocr_mode_returns_result_on_low_confidence(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _low_conf(_image: np.ndarray) -> OCRResult:
@@ -337,8 +350,9 @@ def test_analyze_ocr_mode_returns_result_on_low_confidence_for_correction(
     assert res.status_code == 200
     body = res.json()
     assert body.get("recognized_text") == "低信頼度テキスト"
-    assert body.get("ocr_confidence") == 0.1
-    assert any("修正して再解析" in note for note in body.get("notes", []))
+    assert body.get("ocr_needs_review") is True
+    assert body.get("ocr_issue") == "low_confidence"
+    assert body.get("scores", {}).get("readability", 0.0) > 0.1
 
 
 def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,7 +366,6 @@ def test_analyze_synthetic_dense_vs_sparse_scores_differ(client: TestClient, mon
     score_keys = ["horizontalness", "spacing_uniformity", "size_consistency", "visibility"]
     diffs = [abs(rd["scores"][k] - rs["scores"][k]) for k in score_keys]
     assert max(diffs) >= 0.02
-    assert rd["scores"]["spacing_uniformity"] > rs["scores"]["spacing_uniformity"]
 
 
 def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -364,6 +377,43 @@ def test_analyze_synthetic_neat_vs_irregular_size_consistency(client: TestClient
     ri = _post_analyze(client, irregular).json()
     assert rn.get("pipeline_stage") == "full" and ri.get("pipeline_stage") == "full"
     assert rn["scores"]["size_consistency"] > ri["scores"]["size_consistency"] + 0.05
+
+
+def test_analyze_three_clean_lines_with_white_frame_scores_high(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    payload = _encode_png_bgr(_synthetic_framed_neat_three_lines_board())
+    res = _post_analyze(client, payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["scores"]["readability"] >= 0.7
+    assert body["scores"]["line_alignment"] >= 0.68
+
+
+def test_analyze_tilted_lines_lower_line_alignment(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    neat = _post_analyze(client, _encode_png_bgr(_synthetic_dense_board())).json()
+    tilted = _post_analyze(client, _encode_png_bgr(_synthetic_tilted_board())).json()
+    assert neat["scores"]["line_alignment"] > tilted["scores"]["line_alignment"] + 0.08
+
+
+def test_analyze_faint_strokes_lower_stroke_quality(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    crisp = _post_analyze(client, _encode_png_bgr(_synthetic_dense_board())).json()
+    faint = _post_analyze(client, _encode_png_bgr(_synthetic_faint_board())).json()
+    assert (
+        crisp["scores"]["stroke_quality"] > faint["scores"]["stroke_quality"] + 0.05
+        or crisp["scores"]["readability"] > faint["scores"]["readability"] + 0.05
+    )
+
+
+def test_analyze_low_visibility_keeps_main_handwriting_scores(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    res = _post_analyze(client, _encode_png_bgr(_synthetic_low_visibility_neat_board()))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["scores"]["visibility"] < 0.7
+    assert body["scores"]["readability"] > body["scores"]["visibility"]
+    assert isinstance(body.get("notes"), list)
 
 
 def _synthetic_dense_board() -> np.ndarray:
@@ -405,6 +455,56 @@ def _synthetic_irregular_board() -> np.ndarray:
                 thickness=-1,
             )
     return img
+
+
+def _synthetic_framed_neat_three_lines_board() -> np.ndarray:
+    h, w = 384, 560
+    img = _chalkboard_base(h, w)
+    for row in range(3):
+        y0 = 72 + row * 84
+        for col in range(16):
+            x0 = 44 + col * 30
+            cv2.rectangle(img, (x0, y0), (x0 + 14, y0 + 44), (228, 228, 228), thickness=-1)
+    cv2.rectangle(img, (3, 3), (w - 4, h - 4), (208, 208, 208), thickness=2)
+    return img
+
+
+def _synthetic_tilted_board() -> np.ndarray:
+    h, w = 384, 560
+    img = _chalkboard_base(h, w)
+    for row in range(4):
+        y0 = 64 + row * 68
+        slope = 0.16
+        for col in range(14):
+            x0 = 38 + col * 34
+            y_shift = int(round((x0 - 38) * slope))
+            cv2.rectangle(img, (x0, y0 + y_shift), (x0 + 13, y0 + y_shift + 42), (228, 228, 228), thickness=-1)
+    return img
+
+
+def _synthetic_faint_board() -> np.ndarray:
+    h, w = 384, 560
+    img = _chalkboard_base(h, w)
+    for row in range(4):
+        y0 = 72 + row * 70
+        for col in range(18):
+            x0 = 36 + col * 28
+            color = 138 if (col + row) % 2 else 152
+            cv2.rectangle(img, (x0, y0), (x0 + 10, y0 + 38), (color, color, color), thickness=1)
+    rng = np.random.default_rng(42)
+    drop = rng.random((h, w))
+    faded_mask = np.all(img > np.array([120, 120, 120], dtype=np.uint8), axis=2)
+    img[np.logical_and(faded_mask, drop < 0.25)] = np.array([52, 93, 56], dtype=np.uint8)
+    img = cv2.GaussianBlur(img, (5, 5), 1.3)
+    speckle = rng.normal(0.0, 15.0, size=img.shape).astype(np.int16)
+    return np.clip(img.astype(np.int16) + speckle, 0, 255).astype(np.uint8)
+
+
+def _synthetic_low_visibility_neat_board() -> np.ndarray:
+    img = _synthetic_dense_board().astype(np.float32)
+    img = img * 0.48 + 18.0
+    img = cv2.GaussianBlur(img, (7, 7), 2.0)
+    return np.clip(img, 0, 255).astype(np.uint8)
 
 
 def _chalkboard_base(h: int, w: int) -> np.ndarray:

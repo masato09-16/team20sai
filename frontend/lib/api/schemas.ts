@@ -22,6 +22,10 @@ const gridGuideSchema = z.object({
 });
 
 const analysisScoresSchema = z.object({
+  readability: z.number().min(0).max(1),
+  line_alignment: z.number().min(0).max(1),
+  spacing_balance: z.number().min(0).max(1),
+  stroke_quality: z.number().min(0).max(1),
   horizontalness: z.number().min(0).max(1),
   spacing_uniformity: z.number().min(0).max(1),
   size_consistency: z.number().min(0).max(1),
@@ -54,6 +58,8 @@ export const banshoAnalysisResultSchema = z.object({
   recognized_text: z.string().nullable().optional(),
   ocr_confidence: z.number().min(0).max(1).nullable().optional(),
   ocr_engine: z.string().nullable().optional(),
+  ocr_needs_review: z.boolean().default(false),
+  ocr_issue: z.string().nullable().optional(),
   perspective_corrected: z.boolean().default(false),
 });
 

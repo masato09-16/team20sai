@@ -239,6 +239,69 @@ def _score_line_size_consistency(line_boxes: list[TextLineBox]) -> float:
     return _clamp01(float(np.exp(-max(0.0, cv_h - 0.20) * 3.0)))
 
 
+def _score_stroke_quality(mask: np.ndarray, gray_u8: np.ndarray) -> float:
+    fg = (mask > 127).astype(np.uint8)
+    fg_count = int(np.count_nonzero(fg))
+    if fg_count < 12:
+        return 0.2
+
+    img_area = float(mask.shape[0] * mask.shape[1])
+    fg_ratio = fg_count / max(img_area, 1.0)
+
+    dt = cv2.distanceTransform(fg, cv2.DIST_L2, 3)
+    mean_radius = float(np.mean(dt[fg > 0])) if fg_count > 0 else 0.0
+    mean_thickness = 2.0 * mean_radius
+    if mean_thickness < 1.15:
+        thickness_score = _clamp01(mean_thickness / 1.15)
+    else:
+        thickness_score = float(np.exp(-((mean_thickness - 2.8) / 2.3) ** 2))
+
+    n, _labels, stats, _ = cv2.connectedComponentsWithStats(fg)
+    if n <= 1:
+        noise_score = 0.3
+    else:
+        areas = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+        noise_area_thr = max(6.0, 0.00002 * img_area)
+        tiny_ratio = float(np.count_nonzero(areas < noise_area_thr) / max(1, areas.size))
+        noise_score = _clamp01(1.0 - tiny_ratio * 1.8)
+
+    opened = cv2.morphologyEx(fg * 255, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
+    continuity = float(np.count_nonzero(opened > 127) / max(1, fg_count))
+    continuity_score = _clamp01(continuity * 1.25)
+
+    density_target = 0.06
+    density_score = _clamp01(float(np.exp(-abs(np.log(max(fg_ratio, 1e-6)) - np.log(density_target)) / 2.8)))
+
+    gx = gray_u8.astype(np.float32)
+    fg_pix = gx[fg > 0]
+    bg_pix = gx[fg == 0]
+    if fg_pix.size > 8 and bg_pix.size > 8:
+        fg_mean = float(np.mean(fg_pix))
+        bg_mean = float(np.mean(bg_pix))
+        contrast_score = _clamp01(abs(fg_mean - bg_mean) / 95.0)
+    else:
+        contrast_score = 0.5
+
+    return _clamp01(
+        0.30 * thickness_score
+        + 0.22 * continuity_score
+        + 0.20 * noise_score
+        + 0.14 * density_score
+        + 0.14 * contrast_score
+    )
+
+
+def _suppress_outer_border(mask: np.ndarray, margin_ratio: float = 0.02) -> np.ndarray:
+    h, w = mask.shape[:2]
+    margin = max(2, int(round(min(h, w) * margin_ratio)))
+    out = mask.copy()
+    out[:margin, :] = 0
+    out[h - margin :, :] = 0
+    out[:, :margin] = 0
+    out[:, w - margin :] = 0
+    return out
+
+
 def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationResult:
     """mask: 前景 255 の 1ch。gray_u8: 同一解像度のグレースケール。"""
     h, w = int(mask.shape[0]), int(mask.shape[1])
@@ -248,8 +311,10 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
     if gray_u8.shape[:2] != (h, w):
         raise ValueError("マスクとグレースケールのサイズが一致しません")
 
-    fg_ratio = float(np.count_nonzero(mask > 127) / float(h * w))
-    _, labels, stats, _ = cv2.connectedComponentsWithStats((mask > 127).astype(np.uint8))
+    mask_eval = _suppress_outer_border(mask)
+
+    fg_ratio = float(np.count_nonzero(mask_eval > 127) / float(h * w))
+    _, labels, stats, _ = cv2.connectedComponentsWithStats((mask_eval > 127).astype(np.uint8))
 
     boxes_x: list[int] = []
     boxes_y: list[int] = []
@@ -379,7 +444,7 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
     visibility, vis_notes = compute_visibility_score(mask, gray_u8)
     metric_notes.extend(vis_notes)
 
-    line_boxes = _detect_text_line_boxes(mask)
+    line_boxes = _detect_text_line_boxes(mask_eval)
     if line_boxes:
         line_horizontalness = _score_line_horizontalness(mask, line_boxes)
         line_spacing = _score_line_spacing(line_boxes, h)
@@ -393,9 +458,29 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
             for b in line_boxes
         ]
 
+    line_alignment = _clamp01(float(horizontalness))
+    spacing_balance = _clamp01(float(spacing_uniformity))
+    stroke_quality = _score_stroke_quality(mask_eval, gray_u8)
+    readability = _clamp01(
+        0.34 * line_alignment
+        + 0.22 * size_consistency
+        + 0.20 * spacing_balance
+        + 0.18 * stroke_quality
+        + 0.06 * visibility
+    )
+
+    if stroke_quality < 0.58:
+        metric_notes.append("線が薄い・かすれる・ノイズが多い可能性があります。線の濃さや撮影距離を調整してください。")
+    if line_alignment < 0.55:
+        metric_notes.append("行の傾きや上下ぶれが見られます。行の高さとベースラインを揃えると読みやすくなります。")
+
     scores = AnalysisScores(
-        horizontalness=_clamp01(float(horizontalness)),
-        spacing_uniformity=_clamp01(float(spacing_uniformity)),
+        readability=readability,
+        line_alignment=line_alignment,
+        spacing_balance=spacing_balance,
+        stroke_quality=_clamp01(float(stroke_quality)),
+        horizontalness=line_alignment,
+        spacing_uniformity=spacing_balance,
         size_consistency=_clamp01(float(size_consistency)),
         visibility=_clamp01(float(visibility)),
     )
