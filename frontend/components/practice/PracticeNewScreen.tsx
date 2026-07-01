@@ -7,6 +7,7 @@ import { AlertCircle, Camera, CheckCircle2, ImagePlus, Loader2, Save, Video, Vid
 import { analyzeBoardImage } from "@/lib/api/analyze";
 import { prepareImageForStorageAndAnalysis } from "@/lib/image/prepareImage";
 import { PracticeSteps } from "@/components/practice/PracticeSteps";
+import { ImageCropper } from "@/components/practice/ImageCropper";
 import {
   createAttempt,
   createSessionWithAttempt,
@@ -47,6 +48,10 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
+  // トリミング画面用に追加したステート
+  const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
+  const [currentFilename, setCurrentFilename] = useState<string>("board.jpg");
+
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -82,6 +87,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     fileInputRef.current?.click();
   }, []);
 
+  // ファイルが選ばれたら、まずはトリミング画面に渡す
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -91,10 +97,9 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
     setError(null);
     stopCamera();
-    const next: PendingImage = { blob: file, filename: file.name, mimeType: file.type || "image/jpeg" };
-    setPendingImage(next);
-    setPreview(URL.createObjectURL(file));
-  }, [setPreview, stopCamera]);
+    setCurrentFilename(file.name);
+    setRawImageSrc(URL.createObjectURL(file));
+  }, [stopCamera]);
 
   const startCamera = useCallback(async () => {
     setError(null);
@@ -129,6 +134,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
   }, [setPreview, stopCamera]);
 
+  // カメラ撮影した際も、まずはトリミング画面に回す
   const captureFromCamera = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -156,9 +162,27 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
     setError(null);
     stopCamera();
-    setPendingImage({ blob, filename: "capture.jpg", mimeType: "image/jpeg" });
-    setPreview(URL.createObjectURL(blob));
-  }, [setPreview, stopCamera]);
+    setCurrentFilename("capture.jpg");
+    setRawImageSrc(URL.createObjectURL(blob));
+  }, [stopCamera]);
+
+  // トリミング枠の確定ボタンを押したとき
+  const handleCropComplete = useCallback((croppedBlob: Blob) => {
+    setPendingImage({
+      blob: croppedBlob,
+      filename: currentFilename,
+      mimeType: "image/jpeg",
+    });
+    setPreview(URL.createObjectURL(croppedBlob));
+    if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
+    setRawImageSrc(null);
+  }, [currentFilename, rawImageSrc, setPreview]);
+
+  // トリミングキャンセル時
+  const handleCropCancel = useCallback(() => {
+    if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
+    setRawImageSrc(null);
+  }, [rawImageSrc]);
 
   const saveAndAnalyze = useCallback(async () => {
     if (!pendingImage) {
@@ -358,6 +382,15 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           {error}
         </p>
       ) : null}
+
+      {/* トリミング用画像がある場合のみ、モーダルとしてポップアップ表示 */}
+      {rawImageSrc && (
+        <ImageCropper
+          imageSrc={rawImageSrc}
+          onCropComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
     </section>
   );
 }
