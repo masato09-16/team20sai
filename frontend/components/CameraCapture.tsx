@@ -13,8 +13,21 @@ import {
   RefreshCw,
   Scan,
   Video,
+  Folder,
+  FolderPlus,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+// ローカルストレージに保存するデータの型定義
+type SavedHistoryItem = {
+  id: string;
+  albumName: string;
+  targetText: string;
+  recognizedText: string;
+  score: number;
+  imageUrl: string;
+  createdAt: string;
+};
 
 function scoreLabel(key: keyof BanshoAnalysisResult["scores"]): string {
   const map: Record<keyof BanshoAnalysisResult["scores"], string> = {
@@ -126,6 +139,14 @@ export function CameraCapture() {
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
   const [isReferencePreviewLoading, setIsReferencePreviewLoading] = useState(false);
   const [referencePreviewError, setReferencePreviewError] = useState(false);
+
+  // ★ アルバム自由作成のためのステート
+  const [albumOptions, setAlbumOptions] = useState<string[]>(["未分類"]); // 作成済みのアルバム一覧
+  const [selectedAlbum, setSelectedAlbum] = useState("未分類"); // 保存先
+  const [filterAlbum, setFilterAlbum] = useState("すべて"); // 絞り込み用
+  const [newAlbumName, setNewAlbumName] = useState(""); // 入力中の新しいアルバム名
+  const [historyList, setHistoryList] = useState<SavedHistoryItem[]>([]);
+
   const apiBase = useMemo(() => {
     try {
       return { value: getPublicApiBaseUrl(), configError: null as string | null };
@@ -134,6 +155,45 @@ export function CameraCapture() {
       return { value: "(未設定)", configError: message };
     }
   }, []);
+
+  // 初回読み込み時にローカルストレージから履歴とアルバム一覧を取得
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("bansho_history");
+    if (savedHistory) {
+      try {
+        setHistoryList(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("履歴の読み込みに失敗しました", e);
+      }
+    }
+
+    const savedAlbums = localStorage.getItem("bansho_albums");
+    if (savedAlbums) {
+      try {
+        setAlbumOptions(JSON.parse(savedAlbums));
+      } catch (e) {
+        console.error("アルバム一覧の読み込みに失敗しました", e);
+      }
+    }
+  }, []);
+
+  // ★ 新しいアルバムを独自に追加する関数
+  const handleCreateAlbum = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newAlbumName.trim();
+    if (!trimmed) return;
+    
+    if (albumOptions.includes(trimmed)) {
+      alert("そのアルバム名は既に存在します。");
+      return;
+    }
+
+    const updatedAlbums = [...albumOptions, trimmed];
+    setAlbumOptions(updatedAlbums);
+    localStorage.setItem("bansho_albums", JSON.stringify(updatedAlbums));
+    setSelectedAlbum(trimmed); // 作成したアルバムを自動で選択状態にする
+    setNewAlbumName(""); // 入力欄をクリア
+  };
 
   const revokePreview = useCallback(() => {
     if (objectUrlRef.current) {
@@ -295,7 +355,24 @@ export function CameraCapture() {
     setResult(data);
     setRecognizedTextDraft(data.recognized_text?.trim() ?? "");
     setManualRetryAfterError(false);
-  }, []);
+
+    const scoreValue = Math.round(averageScore(data.scores) * 100);
+    const newHistoryItem: SavedHistoryItem = {
+      id: crypto.randomUUID(),
+      albumName: selectedAlbum,
+      targetText: targetText,
+      recognizedText: data.recognized_text?.trim() ?? "",
+      score: scoreValue,
+      imageUrl: previewUrl || "",
+      createdAt: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setHistoryList((prev) => {
+      const updated = [newHistoryItem, ...prev];
+      localStorage.setItem("bansho_history", JSON.stringify(updated));
+      return updated;
+    });
+  }, [selectedAlbum, targetText, previewUrl]);
 
   const runAnalysis = useCallback(async () => {
     setError(null);
@@ -377,6 +454,17 @@ export function CameraCapture() {
     }
   }, [apiBase.configError, applyAnalysisResult, lastAnalysisImage, recognizedTextDraft]);
 
+  const clearHistory = () => {
+    if (confirm("アルバム履歴と作成したアルバムをすべて削除しますか？")) {
+      localStorage.removeItem("bansho_history");
+      localStorage.removeItem("bansho_albums");
+      setHistoryList([]);
+      setAlbumOptions(["未分類"]);
+      setSelectedAlbum("未分類");
+      setFilterAlbum("すべて");
+    }
+  };
+
   const { overlay } = result ?? {};
   const w = overlay?.image_width ?? 1;
   const h = overlay?.image_height ?? 1;
@@ -392,14 +480,65 @@ export function CameraCapture() {
     recognizedTextDraft.trim().length > 0 &&
     (!result || recognizedTextDraft.trim() !== resultText);
 
+  const filteredHistory = filterAlbum === "すべて"
+    ? historyList
+    : historyList.filter(item => item.albumName === filterAlbum);
+
   return (
     <section className="space-y-6">
       <div className="space-y-2 text-center sm:text-left">
         <p className="text-sm leading-relaxed text-zinc-400">
           <span className="sr-only">手順：</span>
-          画像を選ぶかカメラで撮影して「解析する」。OCR の文字が違う場合は、結果画面で修正して再解析できます。
-          お手本テキストは練習用プレビュー表示のみに使います。
+          画像を選ぶかカメラで撮影して「解析する」。オリジナルのアルバム名を作って、自由に写真を分類・整理できます。
         </p>
+      </div>
+
+      {/* ★★★ 自由アルバム作成＆選択UI ★★★ */}
+      <div className="space-y-4 rounded-xl border border-zinc-850 bg-zinc-900/20 p-4">
+        {/* 新しいアルバムを作るフォーム */}
+        <form onSubmit={handleCreateAlbum} className="space-y-2">
+          <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <FolderPlus className="h-4 w-4 text-emerald-400" />
+            新しいアルバムを作成
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="new-album-input"
+              type="text"
+              value={newAlbumName}
+              onChange={(e) => setNewAlbumName(e.target.value)}
+              placeholder="例：1組の数学、テスト対策など"
+              className="flex-1 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none"
+              disabled={isAnalyzing}
+            />
+            <button
+              type="submit"
+              disabled={!newAlbumName.trim() || isAnalyzing}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-40"
+            >
+              作成
+            </button>
+          </div>
+        </form>
+
+        {/* 作成済みのアルバムから選択するプルダウン */}
+        <div className="space-y-2 pt-2 border-t border-zinc-800/60">
+          <label htmlFor="album-select" className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <Folder className="h-4 w-4 text-sky-400" />
+            今回の保存先アルバムを選択
+          </label>
+          <select
+            id="album-select"
+            value={selectedAlbum}
+            onChange={(e) => setSelectedAlbum(e.target.value)}
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 focus:border-sky-600 focus:outline-none"
+            disabled={isAnalyzing}
+          >
+            {albumOptions.map((album) => (
+              <option key={album} value={album}>{album}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -455,7 +594,6 @@ export function CameraCapture() {
 
       <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3 shadow-lg sm:p-4">
         <div className="relative min-h-[200px] overflow-hidden rounded-xl border border-zinc-800 bg-black sm:min-h-[240px]">
-          {/* プレビュー（ファイル / カメラ） */}
           {previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -654,7 +792,6 @@ export function CameraCapture() {
           </div>
           <p className="text-xs text-zinc-500">
             行の揃い・行間・文字サイズ・視認性を中心に評価しています。
-            解析文字列は OCR または手動修正で指定された内容です。
           </p>
 
           {result.mode === "ocr" || result.mode === "manual" ? (
@@ -705,12 +842,6 @@ export function CameraCapture() {
               <p className="font-mono text-2xl tabular-nums text-sky-300">
                 {(result.reference_comparison.font_similarity * 100).toFixed(0)}%
               </p>
-              <p className="mt-2 text-[11px] text-zinc-500">
-                手書きとフォントの差で低めに出る場合があります。{" "}
-                IoU {(result.reference_comparison.iou * 100).toFixed(0)}% / Dice{" "}
-                {(result.reference_comparison.dice_coefficient * 100).toFixed(0)}% / 画素一致{" "}
-                {(result.reference_comparison.pixel_agreement * 100).toFixed(0)}%
-              </p>
             </div>
           )}
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -740,19 +871,71 @@ export function CameraCapture() {
               ))}
             </ul>
           </div>
-
-          {result.notes.length > 0 && (
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-4">
-              <p className="mb-2 text-xs font-medium text-zinc-500">システムメッセージ</p>
-              <ul className="space-y-1.5 text-sm text-zinc-400">
-                {result.notes.map((n, i) => (
-                  <li key={i}>{n}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
+
+      {/* ★★★ 履歴・アルバム表示エリア ★★★ */}
+      <div className="pt-6 border-t border-zinc-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-zinc-200">📂 作成したアルバム・履歴一覧</h2>
+          {historyList.length > 0 && (
+            <button
+              type="button"
+              onClick={clearHistory}
+              className="text-xs text-zinc-500 hover:text-red-400 transition"
+            >
+              データ全クリア
+            </button>
+          )}
+        </div>
+
+        {/* アルバムフィルターの切り替えタブ（自動で増えます） */}
+        <div className="flex gap-1 overflow-x-auto pb-1 text-xs">
+          {["すべて", ...albumOptions].map((album) => (
+            <button
+              key={album}
+              type="button"
+              onClick={() => setFilterAlbum(album)}
+              className={`shrink-0 rounded-full px-3 py-1.5 font-medium transition ${
+                filterAlbum === album
+                  ? "bg-sky-600 text-white"
+                  : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              {album}
+            </button>
+          ))}
+        </div>
+
+        {/* 履歴リストの表示 */}
+        {filteredHistory.length === 0 ? (
+          <p className="text-xs text-center text-zinc-600 py-6">このアルバムにはまだ写真がありません。</p>
+        ) : (
+          <div className="grid gap-2">
+            {filteredHistory.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-xl border border-zinc-900 bg-zinc-950/60 p-3 text-sm"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                      {item.albumName}
+                    </span>
+                    <span className="text-xs text-zinc-500">{item.createdAt}</span>
+                  </div>
+                  <p className="text-xs text-zinc-300 font-medium max-w-[200px] truncate">
+                    {item.recognizedText || "文字認識なし"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono text-lg font-bold text-sky-400">{item.score}点</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
