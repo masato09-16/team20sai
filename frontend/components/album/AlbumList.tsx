@@ -46,24 +46,52 @@ export function AlbumList() {
   const [selectedAlbum, setSelectedAlbum] = useState("すべて"); // フィルタ用
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // データの読み込み
+useEffect(() => {
+    // 1. 作成済みのアルバム一覧を取得
     const savedAlbums = JSON.parse(localStorage.getItem("bansho_albums") || "[]");
     setAlbums(["すべて", ...savedAlbums]);
 
+    // 2. 撮影画面 (CameraCapture) で保存した履歴データを取得してセットする
     const run = async () => {
-      const sessions = await listSessions();
-      // ここで本来は各セッションがどのアルバムに属するかを判定する必要があります
-      // ※現在はまだ紐付け保存が未実装なため、動作確認用にアルバム名をダミーで付与しています
-      const next = await Promise.all(
-        sessions.map(async (session) => ({ 
-          session, 
-          attempts: await listAttemptsBySession(session.id),
-          albumName: "未分類" // 今後保存処理と連携させる箇所
-        })),
-      );
-      setRows(next);
-      setLoading(false);
+      try {
+        const savedHistory = JSON.parse(localStorage.getItem("bansho_history") || "[]");
+        
+        // 撮影画面の履歴（SavedHistoryItem）の形を、SessionCard が読める Row の形に変換する
+        const next: Row[] = savedHistory.map((item: any) => ({
+   session: {
+  id: item.id,
+  memo: item.targetText || "メモ未入力の練習",
+  updatedAt: new Date().toISOString(), 
+},
+attempts: [
+  {
+    id: item.id,
+    sessionId: item.id,
+    imageBlob: null,
+    analysisStatus: "completed",
+    analysisResult: {
+      scores: {
+        horizontalness: item.score / 100,
+        spacing_uniformity: item.score / 100,
+        size_consistency: item.score / 100,
+        visibility: item.score / 100,
+      },
+      mode: "ocr",
+      recognized_text: item.recognizedText,
+    } as any,
+    createdAt: new Date().toISOString(), // ⭕️ 修正
+    updatedAt: new Date().toISOString(), // ⭕️ 修正
+  }
+],
+          albumName: item.albumName || "未分類" // ★これで選択したアルバム名が正しく入ります！
+        }));
+
+        setRows(next);
+      } catch {
+        setLoadError("保存した練習を読み込めませんでした。");
+      } finally {
+        setLoading(false);
+      }
     };
     void run();
   }, []);
