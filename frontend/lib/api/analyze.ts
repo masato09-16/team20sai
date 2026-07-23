@@ -1,18 +1,35 @@
 import { parseApiErrorResponse } from "@/lib/api/errors";
-import { banshoAnalysisResultSchema, type BanshoAnalysisResult } from "@/lib/api/schemas";
+import {
+  banshoAnalysisResultSchema,
+  type BanshoAnalysisResult,
+  type BoardType,
+  type WritingDirection,
+} from "@/lib/api/schemas";
 import { getPublicApiBaseUrl } from "@/lib/env";
+
+export type AnalyzeBoardImageOptions = {
+  correctedText?: string;
+  boardType?: BoardType;
+  writingDirection?: WritingDirection;
+};
 
 export async function analyzeBoardImage(
   imageBlob: Blob,
   filename = "board.jpg",
-  correctedText?: string,
+  correctedTextOrOptions?: string | AnalyzeBoardImageOptions,
 ): Promise<BanshoAnalysisResult> {
+  const options: AnalyzeBoardImageOptions =
+    typeof correctedTextOrOptions === "string"
+      ? { correctedText: correctedTextOrOptions }
+      : (correctedTextOrOptions ?? {});
   const form = new FormData();
   form.append("file", imageBlob, filename);
-  const trimmedCorrection = correctedText?.trim();
+  const trimmedCorrection = options.correctedText?.trim();
   if (trimmedCorrection) {
     form.append("corrected_text", trimmedCorrection);
   }
+  form.append("board_type", options.boardType ?? "lecture");
+  form.append("writing_direction", options.writingDirection ?? "horizontal");
 
   const res = await fetch(`${getPublicApiBaseUrl()}/analyze`, {
     method: "POST",

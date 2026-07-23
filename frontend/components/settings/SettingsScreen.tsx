@@ -31,20 +31,20 @@ export function SettingsScreen() {
         <h1 className="text-2xl font-semibold text-stone-800">設定・データ管理</h1>
       </header>
 
-      <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="ui-card space-y-3 p-4">
         <p className="text-sm text-stone-700">
           保存した画像と評価結果は、このブラウザ内に保存されます。解析時には選択した画像が解析APIへ送信されます。
         </p>
         <p className="text-sm text-stone-700">個人情報を含む黒板写真は保存しないよう注意してください。</p>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
+      <div className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-4">
         <p className="text-sm font-medium text-orange-900">データ削除</p>
         <button
           type="button"
           onClick={onClearAll}
           disabled={working}
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50"
+          className="ui-button-danger"
         >
           {working ? <AlertTriangle className="h-4 w-4 animate-pulse" /> : <Trash2 className="h-4 w-4" />}
           すべての保存データを削除する

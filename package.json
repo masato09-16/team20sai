@@ -1,4 +1,12 @@
 {
+  "name": "team20sai",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "test:backend": "cd backend && .venv\\Scripts\\python.exe -m pytest"
+  },
   "dependencies": {
     "recharts": "^3.8.1"
   }

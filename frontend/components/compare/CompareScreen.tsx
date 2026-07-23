@@ -5,7 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Camera } from "lucide-react";
 
 import { PracticeSteps } from "@/components/practice/PracticeSteps";
-import { compareMessages, displayScoreItems } from "@/lib/evaluation/viewModel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { DetailPageSkeleton } from "@/components/ui/PageSkeletons";
+import {
+  compareMessages,
+  displayScoreItems,
+  resultDisplayScore,
+  resultOverallScore,
+} from "@/lib/evaluation/viewModel";
 import { listAttemptsBySession } from "@/lib/storage/repository";
 import type { PracticeAttempt } from "@/lib/storage/types";
 import { formatDateTime } from "@/lib/ui/format";
@@ -60,14 +67,15 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
   const right = useMemo(() => attempts.find((a) => a.id === rightId) ?? null, [attempts, rightId]);
   const leftUrl = useBlobUrl(left?.imageBlob ?? null);
   const rightUrl = useBlobUrl(right?.imageBlob ?? null);
+  const isSameSelection = leftId === rightId;
 
-  if (loading) return <p className="text-sm text-stone-500">読み込み中…</p>;
+  if (loading) return <DetailPageSkeleton />;
 
   if (loadError) {
     return (
       <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-orange-800">
         <p>{loadError}</p>
-        <Link href={`/album/${sessionId}`} className="inline-flex rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">
+        <Link href={`/album/${sessionId}`} className="ui-button-primary">
           練習の記録へ戻る
         </Link>
       </section>
@@ -76,27 +84,35 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
 
   if (attempts.length < 2) {
     return (
-      <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-        <PracticeSteps current={3} canCompare={false} />
-        <h1 className="text-xl font-semibold text-stone-800">書き直しで変わったところ</h1>
-        <p className="text-sm text-stone-600">比較できる記録がまだありません。2枚以上保存すると比較できます。</p>
-        <Link
-          href={`/practice/new?sessionId=${sessionId}`}
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
-        >
-          <Camera className="h-4 w-4" />
-          もう一度練習する
-        </Link>
+      <section className="space-y-4">
+        <PracticeSteps current={4} canCompare={false} />
+        <EmptyState
+          icon={Camera}
+          title="比較できる記録がまだありません"
+          description="解析完了した別々の写真が2枚そろうと、書き直し前後の変化を見られます。"
+          action={
+            <Link href={`/practice/new?sessionId=${sessionId}`} className="ui-button-primary">
+              もう一度練習する
+            </Link>
+          }
+        />
       </section>
     );
   }
 
   const messages =
-    left?.analysisResult && right?.analysisResult ? compareMessages(left.analysisResult.scores, right.analysisResult.scores) : [];
+    !isSameSelection && left?.analysisResult && right?.analysisResult
+      ? compareMessages(left.analysisResult.scores, right.analysisResult.scores)
+      : [];
+  const leftOverall = left?.analysisResult ? resultOverallScore(left.analysisResult) : null;
+  const rightOverall = right?.analysisResult ? resultOverallScore(right.analysisResult) : null;
+  const leftDisplayScore = left?.analysisResult ? resultDisplayScore(left.analysisResult) : null;
+  const rightDisplayScore = right?.analysisResult ? resultDisplayScore(right.analysisResult) : null;
+  const overallDelta = !isSameSelection && leftOverall !== null && rightOverall !== null ? rightOverall - leftOverall : null;
 
   return (
     <section className="space-y-4">
-      <PracticeSteps current={3} canCompare />
+      <PracticeSteps current={4} canCompare />
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold text-stone-800">書き直しで変わったところ</h1>
         <p className="text-sm text-stone-600">前回と比べて、どこが整ってきたかを確認できます。</p>
@@ -108,7 +124,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           <select
             value={leftId}
             onChange={(e) => setLeftId(e.target.value)}
-            className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2"
+            className="ui-input w-full px-3 py-2"
           >
             {attempts.map((a, idx) => (
               <option key={a.id} value={a.id}>
@@ -122,7 +138,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
           <select
             value={rightId}
             onChange={(e) => setRightId(e.target.value)}
-            className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2"
+            className="ui-input w-full px-3 py-2"
           >
             {attempts.map((a, idx) => (
               <option key={a.id} value={a.id}>
@@ -134,7 +150,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-stone-200 bg-white p-3">
+        <div className="ui-card p-3">
           <p className="mb-2 text-sm font-medium text-stone-700">比較元</p>
           <div className="overflow-hidden rounded-md border border-stone-200 bg-black">
             {leftUrl ? (
@@ -143,7 +159,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
             ) : null}
           </div>
         </div>
-        <div className="rounded-lg border border-stone-200 bg-white p-3">
+        <div className="ui-card p-3">
           <p className="mb-2 text-sm font-medium text-stone-700">書き直し後</p>
           <div className="overflow-hidden rounded-md border border-stone-200 bg-black">
             {rightUrl ? (
@@ -154,10 +170,28 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      {leftId === rightId ? (
+      {isSameSelection ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           同じ写真を選択中です。書き直し前後を比較するには、別の回を選んでください。
         </p>
+      ) : null}
+
+      {overallDelta !== null && leftDisplayScore !== null && rightDisplayScore !== null ? (
+        <div className="ui-card p-4">
+          <h2 className="text-sm font-semibold text-stone-700">総合点の変化</h2>
+          <div className="mt-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <p className="text-2xl font-bold text-stone-900">
+              {leftDisplayScore}点 → {rightDisplayScore}点
+            </p>
+            <p className={`text-lg font-bold ${overallDelta >= 0 ? "text-emerald-700" : "text-orange-700"}`}>
+              {overallDelta >= 0 ? "+" : ""}
+              {Math.round(overallDelta * 100)}点
+            </p>
+          </div>
+          <p className="mt-2 text-sm text-stone-600">
+            点数の上下だけでなく、下の項目別変化を見て次の練習ポイントを選びましょう。
+          </p>
+        </div>
       ) : null}
 
       {messages.length > 0 ? (
@@ -171,15 +205,15 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
         </div>
       ) : null}
 
-      {left?.analysisResult && right?.analysisResult ? (
-        <div className="rounded-lg border border-stone-200 bg-white p-3">
+      {!isSameSelection && left?.analysisResult && right?.analysisResult ? (
+        <div className="ui-card p-3">
           <h2 className="text-sm font-semibold text-stone-700">項目別スコア変化</h2>
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {displayScoreItems(right.analysisResult.scores).map((item) => {
               const base = left.analysisResult?.scores[item.key as keyof typeof left.analysisResult.scores] ?? 0;
               const delta = item.value - Number(base);
               return (
-                <div key={item.key} className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2">
+                <div key={item.key} className="ui-card-compact px-3 py-2">
                   <p className="text-xs text-stone-500">{item.label}</p>
                   <p className="text-sm font-semibold text-stone-700">
                     {Math.round(Number(base) * 100)}% → {Math.round(item.value * 100)}%
@@ -197,7 +231,7 @@ export function CompareScreen({ sessionId }: { sessionId: string }) {
 
       <Link
         href={`/practice/new?sessionId=${sessionId}`}
-        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
+        className="ui-button-primary"
       >
         もう一度練習する
       </Link>

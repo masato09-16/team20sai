@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, Camera, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Camera, ImagePlus, Trash2 } from "lucide-react";
 
-import { overallScore } from "@/lib/evaluation/viewModel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { DetailPageSkeleton } from "@/components/ui/PageSkeletons";
+import { resultDisplayScore } from "@/lib/evaluation/viewModel";
 import {
   deleteAttempt,
   deleteSession,
@@ -34,13 +36,13 @@ function AttemptRow({
 
   const score =
     attempt.analysisResult && attempt.analysisStatus === "completed"
-      ? `${Math.round(overallScore(attempt.analysisResult.scores) * 100)}点`
+      ? `${resultDisplayScore(attempt.analysisResult)}点`
       : attempt.analysisStatus === "error"
         ? "解析エラー"
         : "解析待ち";
 
   return (
-    <div className="rounded-lg border border-stone-200 bg-white p-3 shadow-sm">
+    <div className="ui-card p-3">
       <div className="flex items-center gap-3">
         <div className="h-16 w-24 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black">
           {url ? (
@@ -58,14 +60,14 @@ function AttemptRow({
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Link
           href={`/practice/${attempt.sessionId}/result/${attempt.id}`}
-          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-100"
+          className="ui-button-quiet min-h-10 px-3 py-2"
         >
           結果を見る
         </Link>
         <button
           type="button"
           onClick={() => onDelete(attempt.id)}
-          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-orange-300 bg-white px-3 py-2 text-sm text-orange-700 hover:bg-orange-50"
+          className="ui-button-danger min-h-10 px-3 py-2"
         >
           <Trash2 className="h-4 w-4" />
           削除
@@ -137,12 +139,15 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
     }
   }, [memo, sessionId]);
 
-  if (loading) return <p className="text-sm text-stone-500">読み込み中…</p>;
+  const comparableAttempts = attempts.filter((attempt) => attempt.analysisStatus === "completed" && attempt.analysisResult);
+  const canCompare = comparableAttempts.length >= 2;
+
+  if (loading) return <DetailPageSkeleton />;
   if (error && !session) {
     return (
       <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
         <p className="text-sm text-orange-800">{error}</p>
-        <Link href="/album" className="inline-flex rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">
+        <Link href="/album" className="ui-button-primary">
           アルバムへ戻る
         </Link>
       </section>
@@ -152,7 +157,7 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
     return (
       <section className="space-y-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
         <p className="text-sm text-orange-800">対象のセッションが見つかりませんでした。</p>
-        <Link href="/album" className="inline-flex rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">
+        <Link href="/album" className="ui-button-primary">
           アルバムへ戻る
         </Link>
       </section>
@@ -169,7 +174,7 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
         <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">{error}</p>
       ) : null}
 
-      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="ui-card p-4">
         <label htmlFor="memo" className="block text-sm font-medium text-stone-800">
           板書の内容メモ
         </label>
@@ -179,7 +184,7 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
           onChange={(e) => setMemo(e.target.value)}
           onBlur={() => void onMemoBlur()}
           rows={2}
-          className="mt-2 w-full resize-y rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-800"
+          className="ui-input mt-2 w-full resize-y px-3 py-2 text-sm"
           placeholder="例：二次方程式の解の公式"
         />
       </div>
@@ -187,33 +192,46 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <Link
           href={`/practice/new?sessionId=${session.id}`}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600"
+          className="ui-button-primary"
         >
           <Camera className="h-4 w-4" />
           同じ内容でもう一度練習する
         </Link>
-        {attempts.length >= 2 ? (
+        {canCompare ? (
           <Link
             href={`/practice/${session.id}/compare`}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm text-stone-700 hover:bg-stone-100"
+            className="ui-button-secondary"
           >
             <ArrowRightLeft className="h-4 w-4" />
             書き直しを比較する
           </Link>
         ) : (
           <div className="inline-flex min-h-11 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 px-4 py-2 text-sm text-stone-500">
-            比較には2枚以上必要です
+            比較には解析完了した写真が2枚以上必要です
           </div>
         )}
         <button
           type="button"
           onClick={() => void onDeleteSession()}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm text-orange-700 hover:bg-orange-50"
+          className="ui-button-danger"
         >
           <Trash2 className="h-4 w-4" />
           練習を削除
         </button>
       </div>
+
+      {attempts.length === 0 ? (
+        <EmptyState
+          icon={ImagePlus}
+          title="この練習には写真がありません"
+          description="もう一度写真を追加すると、この記録に続きとして保存できます。"
+          action={
+            <Link href={`/practice/new?sessionId=${session.id}`} className="ui-button-secondary">
+              写真を追加する
+            </Link>
+          }
+        />
+      ) : null}
 
       <ul className="space-y-2">
         {attempts.map((attempt, index) => (

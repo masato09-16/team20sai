@@ -1,4 +1,10 @@
-import type { AnalysisScores, BanshoAnalysisResult } from "@/lib/api/schemas";
+import type {
+  AnalysisScores,
+  BanshoAnalysisResult,
+  BoardType,
+  FixedRuleScoring,
+  WritingDirection,
+} from "@/lib/api/schemas";
 
 export const MAIN_SCORE_WEIGHTS = {
   readability: 0.35,
@@ -16,6 +22,39 @@ export function overallScore(scores: AnalysisScores): number {
     scores.spacing_balance * MAIN_SCORE_WEIGHTS.spacing_balance +
     scores.stroke_quality * MAIN_SCORE_WEIGHTS.stroke_quality
   );
+}
+
+export const BOARD_TYPE_LABELS: Record<BoardType, string> = {
+  lecture: "講義型",
+  exercise: "演習型",
+  idea: "アイデア型",
+  summary: "まとめ型",
+  display: "掲示型",
+};
+
+export const WRITING_DIRECTION_LABELS: Record<WritingDirection, string> = {
+  horizontal: "横書き",
+  vertical: "縦書き",
+  mixed: "混在",
+};
+
+export function resultDisplayScore(result: BanshoAnalysisResult): number {
+  return result.scoring?.display_score ?? Math.round(overallScore(result.scores) * 100);
+}
+
+export function resultOverallScore(result: BanshoAnalysisResult): number {
+  return result.scoring?.overall ?? overallScore(result.scores);
+}
+
+export function fixedRuleScoreItems(
+  scoring: FixedRuleScoring,
+): Array<{ key: keyof FixedRuleScoring["axes"]; label: string; value: number }> {
+  return [
+    { key: "visibility", label: "見やすさ", value: scoring.axes.visibility },
+    { key: "stability", label: "文字と行の安定", value: scoring.axes.stability },
+    { key: "block_organization", label: "まとまり", value: scoring.axes.block_organization },
+    { key: "margin_interference", label: "余白と干渉", value: scoring.axes.margin_interference },
+  ];
 }
 
 export function displayScoreItems(scores: AnalysisScores): Array<{ key: string; label: string; value: number }> {
@@ -52,22 +91,22 @@ export function improvementHints(result: BanshoAnalysisResult): string[] {
   const hints: string[] = [];
   const threshold = 0.72;
   if (s.readability < threshold) {
-    hints.push("潰れた字や詰まりすぎを減らし、1文字ずつ読める形を意識してみましょう。");
+    hints.push("まず3文字だけ選び、1文字ずつ輪郭が読める大きさで書いてみましょう。");
   }
   if (s.line_alignment < threshold) {
-    hints.push("行の傾きと上下ぶれを抑えて、行の土台をそろえることを意識しましょう。");
+    hints.push("1行書く前に始点と終点の高さを決め、書き終えたら2歩下がって傾きを確認しましょう。");
   }
   if (s.size_consistency < threshold) {
-    hints.push("文字の高さと幅をそろえると、板書全体の安定感が上がります。");
+    hints.push("5文字ごとに文字の上端と下端を見直し、高さの差を小さくしてみましょう。");
   }
   if (s.spacing_balance < threshold) {
-    hints.push("字間と行間に一定の余白を作ると、読み返しやすくなります。");
+    hints.push("文字と文字の間を、今より半文字分だけ広げるつもりで書いてみましょう。");
   }
   if (s.stroke_quality < threshold) {
-    hints.push("線が薄い・かすれる場合は、チョーク圧と書く速度を少し整えてみてください。");
+    hints.push("線が薄い・かすれる部分は、チョークを少し寝かせて一定の速さで書いてみましょう。");
   }
   if (hints.length === 0) {
-    hints.push("今の書き方を維持しつつ、授業を想定して同じ品質を再現してみましょう。");
+    hints.push("今の書き方を維持しつつ、60秒で同じ読みやすさを再現できるか試してみましょう。");
   }
   return hints;
 }

@@ -12,7 +12,16 @@ from app.analysis.mask_compare import compare_reference_masks
 from app.analysis.metrics import compute_metrics, default_guide
 from app.analysis.ocr import OCRResult, recognize_board_text
 from app.analysis.reference import render_reference_mask
-from app.schemas import AnalysisOverlay, AnalysisScores, BoundingBox, BanshoAnalysisResult, GridGuide, Point2D
+from app.schemas import (
+    AnalysisOverlay,
+    AnalysisScores,
+    BanshoAnalysisResult,
+    BlackboardType,
+    BoundingBox,
+    GridGuide,
+    Point2D,
+    WritingDirection,
+)
 
 AnalysisMode = Literal["reference", "ocr", "manual"]
 
@@ -81,6 +90,8 @@ def _run_with_reference_text(
     merged_notes: list[str],
     mode: AnalysisMode,
     perspective_corrected: bool,
+    board_type: BlackboardType,
+    writing_direction: WritingDirection,
     recognized_text: str | None = None,
     ocr_confidence: float | None = None,
     ocr_engine: str | None = None,
@@ -117,7 +128,7 @@ def _run_with_reference_text(
     cmp = compare_reference_masks(ref.mask, mask_work)
 
     try:
-        metrics = compute_metrics(mask_work, gray_work)
+        metrics = compute_metrics(mask_work, gray_work, board_type=board_type, writing_direction=writing_direction)
     except ValueError as exc:
         merged_notes.append(f"レイアウト検出をスキップしました: {exc}")
         visibility = 0.25
@@ -135,6 +146,7 @@ def _run_with_reference_text(
         overlay = AnalysisOverlay(image_width=wo, image_height=ho, baseline_y_positions=[], char_boxes=[], guide=dg)
         return BanshoAnalysisResult(
             scores=scores,
+            scoring=None,
             overlay=overlay,
             notes=merged_notes,
             pipeline_stage="full",
@@ -181,6 +193,7 @@ def _run_with_reference_text(
 
     return BanshoAnalysisResult(
         scores=scores,
+        scoring=metrics.scoring,
         overlay=overlay,
         notes=merged_notes,
         pipeline_stage="full",
@@ -200,6 +213,8 @@ def _run_shape_only(
     merged_notes: list[str],
     mode: AnalysisMode,
     perspective_corrected: bool,
+    board_type: BlackboardType,
+    writing_direction: WritingDirection,
     recognized_text: str | None = None,
     ocr_confidence: float | None = None,
     ocr_engine: str | None = None,
@@ -222,7 +237,7 @@ def _run_shape_only(
         merged_notes.append("画像を解析用に縮小して処理しました（詳細検出への影響は軽いです）。")
 
     try:
-        metrics = compute_metrics(mask_work, gray_work)
+        metrics = compute_metrics(mask_work, gray_work, board_type=board_type, writing_direction=writing_direction)
     except ValueError as exc:
         merged_notes.append(f"レイアウト検出をスキップしました: {exc}")
         dg = default_guide(wo, ho)
@@ -239,6 +254,7 @@ def _run_shape_only(
         overlay = AnalysisOverlay(image_width=wo, image_height=ho, baseline_y_positions=[], char_boxes=[], guide=dg)
         return BanshoAnalysisResult(
             scores=scores,
+            scoring=None,
             overlay=overlay,
             notes=merged_notes,
             pipeline_stage="full",
@@ -271,6 +287,7 @@ def _run_shape_only(
     )
     return BanshoAnalysisResult(
         scores=metrics.scores,
+        scoring=metrics.scoring,
         overlay=overlay,
         notes=merged_notes,
         pipeline_stage="full",
@@ -290,6 +307,8 @@ def run_reference_analysis(
     target_text: str,
     pre_notes: list[str] | None = None,
     perspective_corrected: bool = False,
+    board_type: BlackboardType = "lecture",
+    writing_direction: WritingDirection = "horizontal",
 ) -> BanshoAnalysisResult:
     merged_notes: list[str] = list(pre_notes or [])
     merged_notes.append(
@@ -301,6 +320,8 @@ def run_reference_analysis(
         merged_notes=merged_notes,
         mode="reference",
         perspective_corrected=perspective_corrected,
+        board_type=board_type,
+        writing_direction=writing_direction,
     )
 
 
@@ -308,6 +329,8 @@ def run_ocr_analysis(
     image_bgr_u8: np.ndarray,
     pre_notes: list[str] | None = None,
     perspective_corrected: bool = False,
+    board_type: BlackboardType = "lecture",
+    writing_direction: WritingDirection = "horizontal",
 ) -> BanshoAnalysisResult:
     merged_notes: list[str] = list(pre_notes or [])
     merged_notes.append(
@@ -323,6 +346,8 @@ def run_ocr_analysis(
             merged_notes=merged_notes,
             mode="ocr",
             perspective_corrected=perspective_corrected,
+            board_type=board_type,
+            writing_direction=writing_direction,
             recognized_text=None,
             ocr_confidence=None,
             ocr_engine=None,
@@ -342,6 +367,8 @@ def run_ocr_analysis(
             merged_notes=merged_notes,
             mode="ocr",
             perspective_corrected=perspective_corrected,
+            board_type=board_type,
+            writing_direction=writing_direction,
             recognized_text=None,
             ocr_confidence=None,
             ocr_engine=ocr.engine,
@@ -356,6 +383,8 @@ def run_ocr_analysis(
             merged_notes=merged_notes,
             mode="ocr",
             perspective_corrected=perspective_corrected,
+            board_type=board_type,
+            writing_direction=writing_direction,
             recognized_text=None,
             ocr_confidence=confidence,
             ocr_engine=ocr.engine,
@@ -371,6 +400,8 @@ def run_ocr_analysis(
             merged_notes=merged_notes,
             mode="ocr",
             perspective_corrected=perspective_corrected,
+            board_type=board_type,
+            writing_direction=writing_direction,
             recognized_text=recognized_text,
             ocr_confidence=confidence,
             ocr_engine=ocr.engine,
@@ -384,6 +415,8 @@ def run_ocr_analysis(
         merged_notes=merged_notes,
         mode="ocr",
         perspective_corrected=perspective_corrected,
+        board_type=board_type,
+        writing_direction=writing_direction,
         recognized_text=recognized_text,
         ocr_confidence=confidence,
         ocr_engine=ocr.engine,
@@ -395,6 +428,8 @@ def run_manual_text_analysis(
     corrected_text: str,
     pre_notes: list[str] | None = None,
     perspective_corrected: bool = False,
+    board_type: BlackboardType = "lecture",
+    writing_direction: WritingDirection = "horizontal",
 ) -> BanshoAnalysisResult:
     text = corrected_text.strip()
     if not text:
@@ -410,12 +445,26 @@ def run_manual_text_analysis(
         merged_notes=merged_notes,
         mode="manual",
         perspective_corrected=perspective_corrected,
+        board_type=board_type,
+        writing_direction=writing_direction,
         recognized_text=text,
         ocr_confidence=None,
         ocr_engine="manual",
     )
 
 
-def run_bansho_analysis(image_bgr_u8: np.ndarray, target_text: str) -> BanshoAnalysisResult:
+def run_bansho_analysis(
+    image_bgr_u8: np.ndarray,
+    target_text: str,
+    board_type: BlackboardType = "lecture",
+    writing_direction: WritingDirection = "horizontal",
+) -> BanshoAnalysisResult:
     """後方互換: target_text を使う reference モード。"""
-    return run_reference_analysis(image_bgr_u8, target_text, pre_notes=None, perspective_corrected=False)
+    return run_reference_analysis(
+        image_bgr_u8,
+        target_text,
+        pre_notes=None,
+        perspective_corrected=False,
+        board_type=board_type,
+        writing_direction=writing_direction,
+    )

@@ -6,6 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+BlackboardType = Literal["lecture", "exercise", "idea", "summary", "display"]
+WritingDirection = Literal["horizontal", "vertical", "mixed"]
+
 
 class Point2D(BaseModel):
     x: float
@@ -43,6 +46,32 @@ class AnalysisScores(BaseModel):
     visibility: float = Field(..., ge=0.0, le=1.0)
 
 
+class FixedRuleAxisScores(BaseModel):
+    """OpenCV-based fixed-rule score axes."""
+
+    visibility: float = Field(..., ge=0.0, le=1.0)
+    stability: float = Field(..., ge=0.0, le=1.0)
+    block_organization: float = Field(..., ge=0.0, le=1.0)
+    margin_interference: float = Field(..., ge=0.0, le=1.0)
+
+
+class FixedRuleScoring(BaseModel):
+    """Fixed-rule scoring details for the board image."""
+
+    board_type: BlackboardType = "lecture"
+    writing_direction: WritingDirection = "horizontal"
+    axes: FixedRuleAxisScores
+    overall: float = Field(..., ge=0.0, le=1.0)
+    display_score: int = Field(..., ge=0, le=100)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    density_ratio: float = Field(..., ge=0.0)
+    density_label: str
+    local_crowding: float = Field(..., ge=0.0)
+    local_crowding_label: str
+    caps: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class AnalysisOverlay(BaseModel):
     """AR 風オーバーレイ用の軽量ヒント（画像座標系、元画像サイズ基準）。"""
 
@@ -65,6 +94,7 @@ class ReferenceComparison(BaseModel):
 
 class BanshoAnalysisResult(BaseModel):
     scores: AnalysisScores
+    scoring: FixedRuleScoring | None = None
     overlay: AnalysisOverlay
     notes: list[str] = Field(default_factory=list)
     pipeline_stage: Literal["stub", "full"] = "stub"

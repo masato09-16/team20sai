@@ -13,7 +13,13 @@ from app.analysis.normalize import normalize_board_image
 from app.analysis.preview import render_reference_preview_png
 from app.analysis.pipeline import run_manual_text_analysis, run_ocr_analysis
 from app.cors import cors_middleware_kwargs
-from app.schemas import BanshoAnalysisResult, HealthResponse, ReferencePreviewRequest
+from app.schemas import (
+    BanshoAnalysisResult,
+    BlackboardType,
+    HealthResponse,
+    ReferencePreviewRequest,
+    WritingDirection,
+)
 
 app = FastAPI(title="板書上達支援 API", version="0.1.0")
 
@@ -29,6 +35,8 @@ def health() -> HealthResponse:
 async def analyze(
     file: UploadFile = File(description="板書画像（JPEG/PNG 等）"),
     corrected_text: str | None = Form(default=None, description="OCR 誤認識時にユーザーが修正した文字列"),
+    board_type: BlackboardType = Form(default="lecture", description="lecture/exercise/idea/summary/display"),
+    writing_direction: WritingDirection = Form(default="horizontal", description="horizontal/vertical/mixed"),
 ) -> BanshoAnalysisResult:
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
@@ -59,11 +67,15 @@ async def analyze(
                 corrected_text,
                 pre_notes=normalized.notes,
                 perspective_corrected=normalized.perspective_corrected,
+                board_type=board_type,
+                writing_direction=writing_direction,
             )
         return run_ocr_analysis(
             normalized.image_bgr,
             pre_notes=normalized.notes,
             perspective_corrected=normalized.perspective_corrected,
+            board_type=board_type,
+            writing_direction=writing_direction,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

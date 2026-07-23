@@ -2,9 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Camera, CheckCircle2, ImagePlus, Loader2, Save, Video, VideoOff, Folder, FolderPlus } from "lucide-react";
+import {
+  AlertCircle,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  ImagePlus,
+  Loader2,
+  Save,
+  ShieldCheck,
+  Video,
+  VideoOff,
+  Folder,
+  FolderPlus,
+} from "lucide-react";
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
+import type { BoardType, WritingDirection } from "@/lib/api/schemas";
 import { prepareImageForStorageAndAnalysis } from "@/lib/image/prepareImage";
 import { PracticeSteps } from "@/components/practice/PracticeSteps";
 import { ImageCropper } from "@/components/practice/ImageCropper";
@@ -15,6 +29,7 @@ import {
   setAttemptCompleted,
   setAttemptError,
   setAttemptAnalyzing,
+  updateSessionAlbumName,
   updateSessionMemo,
 } from "@/lib/storage/repository";
 import type { PracticeAttempt } from "@/lib/storage/types";
@@ -24,6 +39,30 @@ type PendingImage = {
   filename: string;
   mimeType: string;
 };
+
+const BOARD_TYPE_OPTIONS: Array<{ value: BoardType; label: string; description: string }> = [
+  { value: "lecture", label: "講義型", description: "説明中心の板書" },
+  { value: "exercise", label: "演習型", description: "問題・解説の板書" },
+  { value: "idea", label: "アイデア型", description: "意見や案の整理" },
+  { value: "summary", label: "まとめ型", description: "要点の整理" },
+  { value: "display", label: "掲示型", description: "遠くから見せる板書" },
+];
+
+const WRITING_DIRECTION_OPTIONS: Array<{ value: WritingDirection; label: string }> = [
+  { value: "horizontal", label: "横書き" },
+  { value: "vertical", label: "縦書き" },
+  { value: "mixed", label: "混在" },
+];
+
+function parseAlbumOptions(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem("bansho_albums") || "[]");
+    const saved = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
+    return Array.from(new Set(["未分類", ...saved]));
+  } catch {
+    return ["未分類"];
+  }
+}
 
 function toUserMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -47,12 +86,13 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [boardType, setBoardType] = useState<BoardType>("lecture");
+  const [writingDirection, setWritingDirection] = useState<WritingDirection>("horizontal");
 
   // トリミング画面用
   const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>("board.jpg");
 
-  // ★ アルバム機能用のステートを追加
   const [albumOptions, setAlbumOptions] = useState<string[]>(["未分類"]);
   const [selectedAlbum, setSelectedAlbum] = useState("未分類");
   const [newAlbumName, setNewAlbumName] = useState("");
@@ -74,15 +114,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     mountedRef.current = true;
     let mounted = true;
 
-    // アルバム一覧をローカルストレージから読み込む
-    const savedAlbums = localStorage.getItem("bansho_albums");
-    if (savedAlbums) {
-      try {
-        setAlbumOptions(JSON.parse(savedAlbums));
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    setAlbumOptions(parseAlbumOptions());
 
     const loadMemo = async () => {
       if (!initialSessionId) return;
@@ -90,8 +122,8 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       if (!mounted) return;
       if (session?.memo) setMemo(session.memo);
       // セッションに既存のアルバム名があればセットする
-      if (session && (session as any).albumName) {
-        setSelectedAlbum((session as any).albumName);
+      if (session?.albumName) {
+        setSelectedAlbum(session.albumName);
       }
     };
     void loadMemo();
@@ -232,7 +264,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       
       if (existingSession) {
         await updateSessionMemo(existingSession.id, memo || null);
-        (existingSession as any).albumName = selectedAlbum;
+        await updateSessionAlbumName(existingSession.id, selectedAlbum);
         sessionId = existingSession.id;
         attempt = await createAttempt({
           sessionId: existingSession.id,
@@ -243,43 +275,22 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       } else {
         const created = await createSessionWithAttempt({
           memo: memo || null,
+          albumName: selectedAlbum,
           imageBlob: prepared.blob,
           imageMimeType: prepared.mimeType,
           originalFilename: pendingImage.filename,
         });
         sessionId = created.session.id;
-        (created.session as any).albumName = selectedAlbum;
         attempt = created.attempt;
       }
 
-      // 一覧画面と同期させるためにlocalStorageへ保存データを書き込む
-      const savedHistory = JSON.parse(localStorage.getItem("bansho_history") || "[]");
-      const scoreValue = 80; // 初期値
-      const newHistoryItem = {
-        id: sessionId,
-        albumName: selectedAlbum,
-        targetText: memo || "メモ未入力の練習",
-        recognizedText: "",
-        score: scoreValue,
-        imageUrl: "",
-        createdAt: new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
-      };
-      localStorage.setItem("bansho_history", JSON.stringify([newHistoryItem, ...savedHistory]));
-
       await setAttemptAnalyzing(attempt.id);
       try {
-        const result = await analyzeBoardImage(prepared.blob, pendingImage.filename || "board.jpg");
+        const result = await analyzeBoardImage(prepared.blob, pendingImage.filename || "board.jpg", {
+          boardType,
+          writingDirection,
+        });
         await setAttemptCompleted({ attemptId: attempt.id, result, correctedText: null });
-        
-        // 解析完了後にスコアと認識文字を同期
-        const updatedHistory = JSON.parse(localStorage.getItem("bansho_history") || "[]");
-        const found = updatedHistory.find((h: any) => h.id === sessionId);
-        if (found && result.scores) {
-          const v = Object.values(result.scores);
-          found.score = Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100);
-          found.recognizedText = result.recognized_text || "";
-          localStorage.setItem("bansho_history", JSON.stringify(updatedHistory));
-        }
       } catch (analysisErr) {
         await setAttemptError(attempt.id, toUserMessage(analysisErr));
       }
@@ -289,7 +300,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     } finally {
       if (mountedRef.current) setIsBusy(false);
     }
-  }, [initialSessionId, memo, pendingImage, router, selectedAlbum]);
+  }, [boardType, initialSessionId, memo, pendingImage, router, selectedAlbum, writingDirection]);
 
   const resetPendingOnly = useCallback(() => {
     setPendingImage(null);
@@ -303,59 +314,28 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     <section className="space-y-5">
       <PracticeSteps current={1} />
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">{hasSelectedImage ? "この写真で振り返りますか？" : "板書を撮影する"}</h1>
+        <h1 className="text-2xl font-semibold text-stone-800">{hasSelectedImage ? "この写真で診断しますか？" : "黒板写真を1枚用意する"}</h1>
         <p className="text-sm text-stone-600">
-          {hasSelectedImage ? "写真を確認して、今回の振り返りへ進みましょう。" : "書いた黒板文字の写真を選んでください。"}
+          {hasSelectedImage ? "写真を確認して、診断結果へ進みましょう。" : "登録なしで診断できます。まずは黒板全体が入った写真を撮るか選んでください。"}
         </p>
       </header>
 
-      {/* ★★★ 自由アルバム作成＆選択UI ★★★ */}
-      <div className="space-y-4 rounded-xl border border-stone-200 bg-stone-50 p-4 shadow-sm">
-        <form onSubmit={handleCreateAlbum} className="space-y-2">
-          <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-stone-700">
-            <FolderPlus className="h-4 w-4 text-teal-700" />
-            新しいアルバムを作成
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="new-album-input"
-              type="text"
-              value={newAlbumName}
-              onChange={(e) => setNewAlbumName(e.target.value)}
-              placeholder="例：1組の数学、テスト対策など"
-              className="flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none"
-              disabled={isBusy}
-            />
-            <button
-              type="submit"
-              disabled={!newAlbumName.trim() || isBusy}
-              className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-teal-600 disabled:opacity-40"
-            >
-              作成
-            </button>
-          </div>
-        </form>
-
-        <div className="space-y-2 pt-2 border-t border-stone-200">
-          <label htmlFor="album-select" className="flex items-center gap-2 text-sm font-medium text-stone-700">
-            <Folder className="h-4 w-4 text-teal-700" />
-            今回の保存先アルバムを選択
-          </label>
-          <select
-            id="album-select"
-            value={selectedAlbum}
-            onChange={(e) => setSelectedAlbum(e.target.value)}
-            className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm text-stone-800 focus:border-teal-600 focus:outline-none"
-            disabled={isBusy}
-          >
-            {albumOptions.map((album) => (
-              <option key={album} value={album}>{album}</option>
-            ))}
-          </select>
+      {!pendingImage ? (
+        <div className="ui-card p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800">
+            <ShieldCheck className="h-4 w-4 text-teal-700" />
+            きれいに診断するコツ
+          </h2>
+          <ul className="mt-3 grid grid-cols-1 gap-2 text-sm text-stone-700 sm:grid-cols-2">
+            <li className="ui-card-compact px-3 py-2">黒板全体を枠内に入れる</li>
+            <li className="ui-card-compact px-3 py-2">できるだけ正面から撮る</li>
+            <li className="ui-card-compact px-3 py-2">暗さ・反射・ピンぼけを避ける</li>
+            <li className="ui-card-compact px-3 py-2">人名・顔・学校名が写らないか確認</li>
+          </ul>
         </div>
-      </div>
+      ) : null}
 
-      <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="ui-card space-y-3 p-4">
         <input
           ref={fileInputRef}
           type="file"
@@ -384,41 +364,38 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <button
-            type="button"
-            onClick={onPickFile}
-            disabled={isBusy || isStartingCamera}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-stone-100 px-4 py-3 text-sm font-medium text-stone-800 hover:bg-stone-200 disabled:opacity-50"
-          >
-            <ImagePlus className="h-4 w-4" />
-            端末の写真から選ぶ
-          </button>
-          <button
-            type="button"
-            onClick={cameraActive ? stopCamera : startCamera}
-            disabled={isBusy || isStartingCamera}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
-          >
-            {isStartingCamera ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : cameraActive ? (
-              <VideoOff className="h-4 w-4" />
-            ) : (
-              <Video className="h-4 w-4" />
-            )}
-            {isStartingCamera ? "カメラ準備中…" : cameraActive ? "カメラ停止" : "カメラで撮影する"}
-          </button>
-          <button
-            type="button"
-            onClick={captureFromCamera}
-            disabled={!cameraActive || isBusy || isStartingCamera}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            この写真を使う
-          </button>
-        </div>
+        {!pendingImage ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={cameraActive ? captureFromCamera : startCamera}
+              disabled={isBusy || isStartingCamera}
+              className="ui-button-primary min-h-12 py-3"
+            >
+              {isStartingCamera ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : cameraActive ? (
+                <CheckCircle2 className="h-4 w-4" />
+              ) : (
+                <Video className="h-4 w-4" />
+              )}
+              {isStartingCamera ? "カメラ準備中…" : cameraActive ? "この写真を使う" : "カメラで撮る"}
+            </button>
+            <button
+              type="button"
+              onClick={cameraActive ? stopCamera : onPickFile}
+              disabled={isBusy || isStartingCamera}
+              className="ui-button-quiet min-h-12 py-3"
+            >
+              {cameraActive ? (
+                <VideoOff className="h-4 w-4" />
+              ) : (
+                <ImagePlus className="h-4 w-4" />
+              )}
+              {cameraActive ? "カメラを止める" : "写真を選ぶ"}
+            </button>
+          </div>
+        ) : null}
 
         {pendingImage ? (
           <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-stone-700">
@@ -428,36 +405,75 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
         ) : null}
 
         {pendingImage ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="space-y-3">
+            <div className="ui-card-compact space-y-3 p-3">
+              <div>
+                <p className="text-sm font-semibold text-stone-800">採点条件</p>
+                <p className="mt-1 text-xs leading-5 text-stone-500">迷ったらこのままで大丈夫です。用途に合わせると総合点の重みが変わります。</p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-sm font-medium text-stone-700">
+                  板書タイプ
+                  <select
+                    value={boardType}
+                    onChange={(e) => setBoardType(e.target.value as BoardType)}
+                    disabled={isBusy || isStartingCamera}
+                    className="ui-input w-full px-3 py-2 text-sm"
+                  >
+                    {BOARD_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} - {option.description}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm font-medium text-stone-700">
+                  書き方
+                  <select
+                    value={writingDirection}
+                    onChange={(e) => setWritingDirection(e.target.value as WritingDirection)}
+                    disabled={isBusy || isStartingCamera}
+                    className="ui-input w-full px-3 py-2 text-sm"
+                  >
+                    {WRITING_DIRECTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
             <button
               type="button"
-              onClick={resetPendingOnly}
+              onClick={saveAndAnalyze}
               disabled={isBusy || isStartingCamera}
-              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+              className="ui-button-primary min-h-[3.2rem] w-full py-3 text-base"
             >
-              撮り直す
+              {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+              この写真で診断する
             </button>
-            <button
-              type="button"
-              onClick={onPickFile}
-              disabled={isBusy || isStartingCamera}
-              className="inline-flex min-h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-50"
-            >
-              別の写真を選ぶ
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={resetPendingOnly}
+                disabled={isBusy || isStartingCamera}
+                className="ui-button-quiet min-h-10 px-3 py-2"
+              >
+                撮り直す
+              </button>
+              <button
+                type="button"
+                onClick={onPickFile}
+                disabled={isBusy || isStartingCamera}
+                className="ui-button-quiet min-h-10 px-3 py-2"
+              >
+                別の写真を選ぶ
+              </button>
+            </div>
+            <p className="text-xs text-stone-500">写真と診断結果は、このブラウザの練習記録に保存されます。</p>
           </div>
         ) : null}
-
-        <button
-          type="button"
-          onClick={saveAndAnalyze}
-          disabled={isBusy || isStartingCamera || !pendingImage}
-          className="inline-flex min-h-[3.2rem] w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-teal-600 disabled:opacity-50"
-        >
-          {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-          この写真で振り返る
-        </button>
-        {pendingImage ? <p className="text-xs text-stone-500">写真と振り返り結果は練習記録に保存されます。</p> : null}
       </div>
 
       <div className="space-y-2">
@@ -469,11 +485,62 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
           rows={2}
-          className="w-full resize-y rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-teal-600 focus:outline-none focus:ring-1 focus:ring-teal-600"
+          className="ui-input w-full resize-y px-3 py-2 text-sm placeholder:text-stone-400"
           placeholder="例：二次方程式の解の公式"
           disabled={isBusy || isStartingCamera}
         />
       </div>
+
+      <details className="ui-card p-4">
+        <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold text-stone-800">
+          <span className="flex items-center gap-2">
+            <Folder className="h-4 w-4 text-teal-700" />
+            保存先アルバムを選ぶ
+          </span>
+          <ChevronDown className="h-4 w-4 text-stone-500" />
+        </summary>
+        <div className="mt-3 space-y-4">
+          <label htmlFor="album-select" className="block text-sm font-medium text-stone-700">
+            今回の保存先
+          </label>
+          <select
+            id="album-select"
+            value={selectedAlbum}
+            onChange={(e) => setSelectedAlbum(e.target.value)}
+            className="ui-input w-full px-3 py-2.5 text-sm"
+            disabled={isBusy}
+          >
+            {albumOptions.map((album) => (
+              <option key={album} value={album}>{album}</option>
+            ))}
+          </select>
+
+          <form onSubmit={handleCreateAlbum} className="space-y-2 border-t border-stone-200 pt-3">
+            <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-stone-700">
+              <FolderPlus className="h-4 w-4 text-teal-700" />
+              新しいアルバムを作成
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="new-album-input"
+                type="text"
+                value={newAlbumName}
+                onChange={(e) => setNewAlbumName(e.target.value)}
+                placeholder="例：教育実習、テスト対策など"
+                className="ui-input min-w-0 flex-1 px-3 py-2 text-sm placeholder:text-stone-400"
+                disabled={isBusy}
+              />
+              <button
+                type="submit"
+                disabled={!newAlbumName.trim() || isBusy}
+                className="ui-button-primary min-h-10 px-4 py-2"
+              >
+                作成
+              </button>
+            </div>
+          </form>
+        </div>
+      </details>
 
       {permissionDenied ? (
         <p className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">

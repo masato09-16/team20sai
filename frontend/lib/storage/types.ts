@@ -7,6 +7,7 @@ export type PracticeSession = {
   createdAt: string;
   updatedAt: string;
   memo: string | null;
+  albumName?: string | null;
 };
 
 export type PracticeAttempt = {

@@ -48,8 +48,34 @@ const referenceComparisonSchema = z.object({
   contour_distance_score: z.number().min(0).max(1),
 });
 
+export const boardTypeSchema = z.enum(["lecture", "exercise", "idea", "summary", "display"]);
+export const writingDirectionSchema = z.enum(["horizontal", "vertical", "mixed"]);
+
+const fixedRuleAxisScoresSchema = z.object({
+  visibility: z.number().min(0).max(1),
+  stability: z.number().min(0).max(1),
+  block_organization: z.number().min(0).max(1),
+  margin_interference: z.number().min(0).max(1),
+});
+
+const fixedRuleScoringSchema = z.object({
+  board_type: boardTypeSchema.default("lecture"),
+  writing_direction: writingDirectionSchema.default("horizontal"),
+  axes: fixedRuleAxisScoresSchema,
+  overall: z.number().min(0).max(1),
+  display_score: z.number().int().min(0).max(100),
+  confidence: z.number().min(0).max(1),
+  density_ratio: z.number().nonnegative(),
+  density_label: z.string(),
+  local_crowding: z.number().nonnegative(),
+  local_crowding_label: z.string(),
+  caps: z.array(z.string()).default([]),
+  notes: z.array(z.string()).default([]),
+});
+
 export const banshoAnalysisResultSchema = z.object({
   scores: analysisScoresSchema,
+  scoring: fixedRuleScoringSchema.nullable().optional(),
   overlay: analysisOverlaySchema,
   notes: z.array(z.string()),
   pipeline_stage: z.enum(["stub", "full"]),
@@ -68,3 +94,7 @@ export type AnalysisScores = z.infer<typeof analysisScoresSchema>;
 export type AnalysisOverlay = z.infer<typeof analysisOverlaySchema>;
 export type GridGuide = z.infer<typeof gridGuideSchema>;
 export type ReferenceComparison = z.infer<typeof referenceComparisonSchema>;
+export type BoardType = z.infer<typeof boardTypeSchema>;
+export type WritingDirection = z.infer<typeof writingDirectionSchema>;
+export type FixedRuleAxisScores = z.infer<typeof fixedRuleAxisScoresSchema>;
+export type FixedRuleScoring = z.infer<typeof fixedRuleScoringSchema>;

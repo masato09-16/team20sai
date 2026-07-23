@@ -33,6 +33,8 @@ def _post_analyze(
     png_bytes: bytes,
     target_text: str | None = None,
     corrected_text: str | None = None,
+    board_type: str | None = None,
+    writing_direction: str | None = None,
 ) -> object:
     files = {"file": ("t.png", png_bytes, "image/png")}
     data: dict[str, str] = {}
@@ -40,6 +42,10 @@ def _post_analyze(
         data["target_text"] = target_text
     if corrected_text is not None:
         data["corrected_text"] = corrected_text
+    if board_type is not None:
+        data["board_type"] = board_type
+    if writing_direction is not None:
+        data["writing_direction"] = writing_direction
     if not data:
         return client.post("/analyze", files=files)
     return client.post("/analyze", files=files, data=data)
@@ -239,6 +245,23 @@ def test_analyze_accepts_minimal_png_with_stubbed_ocr(client: TestClient, monkey
         assert 0.0 <= rc[k] <= 1.0
     ov = body["overlay"]
     assert ov["image_width"] > 0 and ov["image_height"] > 0
+
+
+def test_analyze_returns_fixed_rule_scoring_options(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_ocr(monkeypatch)
+    res = _post_analyze(
+        client,
+        _tiny_png_bytes(),
+        board_type="display",
+        writing_direction="mixed",
+    )
+    assert res.status_code == 200
+    scoring = res.json().get("scoring")
+    assert scoring is not None
+    assert scoring["board_type"] == "display"
+    assert scoring["writing_direction"] == "mixed"
+    assert scoring["display_score"] % 5 == 0
+    assert set(scoring["axes"]) == {"visibility", "stability", "block_organization", "margin_interference"}
 
 
 def test_analyze_ocr_mode_with_stubbed_recognizer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

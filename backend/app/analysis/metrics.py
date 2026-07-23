@@ -10,7 +10,16 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from app.schemas import AnalysisScores, BoundingBox, GridGuide, Point2D
+from app.schemas import (
+    AnalysisScores,
+    BlackboardType,
+    BoundingBox,
+    FixedRuleAxisScores,
+    FixedRuleScoring,
+    GridGuide,
+    Point2D,
+    WritingDirection,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +33,7 @@ class TextLineBox:
 @dataclass(frozen=True)
 class MetricComputationResult:
     scores: AnalysisScores
+    scoring: FixedRuleScoring
     baseline_y_positions: list[float]
     char_boxes: list[BoundingBox]
     guide: GridGuide
@@ -42,6 +52,354 @@ def _coefficient_of_variation(values: np.ndarray) -> float:
     if m < 1e-9:
         return 1.0
     return float(np.std(values) / m)
+
+
+def _robust_cv(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 1.0
+    med = float(np.median(values))
+    if med < 1e-9:
+        return 1.0
+    mad = float(np.median(np.abs(values.astype(np.float64) - med)))
+    return float(1.4826 * mad / med)
+
+
+def _score_less_is_better(value: float, good: float, bad: float) -> float:
+    if bad <= good:
+        return 1.0 if value <= good else 0.0
+    return _clamp01(1.0 - (float(value) - good) / (bad - good))
+
+
+def _score_more_is_better(value: float, bad: float, good: float) -> float:
+    if good <= bad:
+        return 1.0 if value >= good else 0.0
+    return _clamp01((float(value) - bad) / (good - bad))
+
+
+def _score_band(value: float, low_bad: float, good_low: float, good_high: float, high_bad: float) -> float:
+    if value < good_low:
+        return _score_more_is_better(value, low_bad, good_low)
+    if value > good_high:
+        return _score_less_is_better(value, good_high, high_bad)
+    return 1.0
+
+
+def _percentile(values: list[float] | np.ndarray, q: float, default: float) -> float:
+    arr = np.array(values, dtype=np.float64)
+    if arr.size == 0:
+        return default
+    return float(np.percentile(arr, q))
+
+
+def _label_density(value: float) -> str:
+    if value < 0.025:
+        return "low"
+    if value < 0.16:
+        return "moderate"
+    return "high"
+
+
+def _label_crowding(value: float) -> str:
+    if value < 0.34:
+        return "low"
+    if value < 0.62:
+        return "moderate"
+    return "high"
+
+
+_BOARD_TYPE_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
+    "lecture": (0.40, 0.25, 0.20, 0.15),
+    "exercise": (0.35, 0.25, 0.25, 0.15),
+    "idea": (0.30, 0.15, 0.35, 0.20),
+    "summary": (0.35, 0.20, 0.30, 0.15),
+    "display": (0.25, 0.10, 0.40, 0.25),
+}
+
+_SIZE_RATIO_RULES: dict[str, tuple[float, float, float, float]] = {
+    "lecture": (0.018, 0.050, 0.150, 0.240),
+    "exercise": (0.016, 0.046, 0.150, 0.240),
+    "idea": (0.014, 0.040, 0.155, 0.250),
+    "summary": (0.018, 0.052, 0.160, 0.250),
+    "display": (0.010, 0.032, 0.150, 0.260),
+}
+
+
+def _gap_statistics_for_rows(
+    rows: list[np.ndarray],
+    boxes_x: np.ndarray,
+    boxes_w: np.ndarray,
+    widths_arr: np.ndarray,
+) -> tuple[float, float]:
+    ratios: list[float] = []
+    center_gap_cvs: list[float] = []
+    for row_idx in rows:
+        if row_idx.size < 2:
+            continue
+        order = row_idx[np.argsort(boxes_x[row_idx])]
+        local_width = float(np.median(widths_arr[order])) if order.size else 1.0
+        local_width = max(local_width, 1.0)
+        edges = [(float(boxes_x[i]), float(boxes_x[i] + boxes_w[i])) for i in order]
+        for (_, right), (left_next, _) in zip(edges, edges[1:], strict=False):
+            ratios.append((left_next - right) / local_width)
+        centers = boxes_x[order].astype(np.float64) + boxes_w[order].astype(np.float64) / 2.0
+        gaps = np.diff(centers)
+        gaps = gaps[gaps > 0.25]
+        if gaps.size >= 3:
+            center_gap_cvs.append(_robust_cv(gaps))
+    return _percentile(ratios, 20.0, 0.35), _percentile(center_gap_cvs, 50.0, 0.25)
+
+
+def _vertical_straightness(
+    columns: list[np.ndarray],
+    cx: np.ndarray,
+    boxes_w: np.ndarray,
+) -> float:
+    if not columns:
+        return 0.35
+    scores: list[float] = []
+    for col_idx in columns:
+        if col_idx.size < 2:
+            continue
+        local_w = float(np.median(boxes_w[col_idx])) if col_idx.size else 1.0
+        disp = float(np.std(cx[col_idx]) / max(local_w, 1.0))
+        scores.append(float(np.exp(-disp * 3.8)))
+    if not scores:
+        return 0.78
+    return _clamp01(float(np.mean(scores)))
+
+
+def _column_gap_cv(columns: list[np.ndarray], cx: np.ndarray) -> float:
+    if len(columns) < 2:
+        return 0.25
+    centers = [float(np.median(cx[idx])) for idx in columns if idx.size > 0]
+    if len(centers) < 2:
+        return 0.25
+    gaps = np.diff(np.sort(np.array(centers, dtype=np.float64)))
+    gaps = gaps[gaps > 0.25]
+    return _robust_cv(gaps) if gaps.size >= 2 else 0.25
+
+
+def _grid_local_crowding(mask_eval: np.ndarray, median_height: float) -> float:
+    h, w = mask_eval.shape[:2]
+    cell = int(max(32.0, min(180.0, median_height * 3.0)))
+    densities: list[float] = []
+    fg = mask_eval > 127
+    for y in range(0, h, cell):
+        for x in range(0, w, cell):
+            sub = fg[y : min(h, y + cell), x : min(w, x + cell)]
+            if sub.size:
+                densities.append(float(np.count_nonzero(sub) / sub.size))
+    return _percentile(densities, 95.0, 0.0)
+
+
+def _max_box_overlap(line_boxes: list[TextLineBox]) -> float:
+    if len(line_boxes) < 2:
+        return 0.0
+    max_overlap = 0.0
+    for i, a in enumerate(line_boxes):
+        ax1, ay1 = a.x + a.width, a.y + a.height
+        area_a = max(1.0, float(a.width * a.height))
+        for b in line_boxes[i + 1 :]:
+            bx1, by1 = b.x + b.width, b.y + b.height
+            ix = max(0, min(ax1, bx1) - max(a.x, b.x))
+            iy = max(0, min(ay1, by1) - max(a.y, b.y))
+            if ix <= 0 or iy <= 0:
+                continue
+            area_b = max(1.0, float(b.width * b.height))
+            max_overlap = max(max_overlap, float(ix * iy) / min(area_a, area_b))
+    return max_overlap
+
+
+def _line_gap_ratios(line_boxes: list[TextLineBox]) -> list[float]:
+    if len(line_boxes) < 2:
+        return []
+    ordered = sorted(line_boxes, key=lambda b: (b.y, b.x))
+    median_height = max(1.0, float(np.median([b.height for b in ordered])))
+    return [
+        float((b.y - (a.y + a.height)) / median_height)
+        for a, b in zip(ordered, ordered[1:], strict=False)
+    ]
+
+
+def _compute_fixed_rule_scoring(
+    mask_eval: np.ndarray,
+    gray_u8: np.ndarray,
+    *,
+    board_type: BlackboardType,
+    writing_direction: WritingDirection,
+    line_boxes: list[TextLineBox],
+    rows: list[np.ndarray],
+    columns: list[np.ndarray],
+    boxes_x: np.ndarray,
+    boxes_y: np.ndarray,
+    boxes_w: np.ndarray,
+    boxes_h: np.ndarray,
+    areas_arr: np.ndarray,
+    cx: np.ndarray,
+    cy: np.ndarray,
+    horizontalness: float,
+    spacing_uniformity: float,
+    size_consistency: float,
+    stroke_quality: float,
+    capture_visibility: float,
+) -> FixedRuleScoring:
+    h, w = int(mask_eval.shape[0]), int(mask_eval.shape[1])
+    fg = mask_eval > 127
+    fg_ratio = float(np.count_nonzero(fg) / max(1, h * w))
+    n_blob = int(areas_arr.size)
+
+    median_h = float(np.median(boxes_h)) if boxes_h.size else float(h / 24.0)
+    median_w = float(np.median(boxes_w)) if boxes_w.size else float(w / 40.0)
+    median_h = max(1.0, median_h)
+    median_w = max(1.0, median_w)
+
+    low_bad, good_low, good_high, high_bad = _SIZE_RATIO_RULES.get(str(board_type), _SIZE_RATIO_RULES["lecture"])
+    size_ratio = median_h / max(1.0, float(h))
+    char_size_score = _score_band(size_ratio, low_bad, good_low, good_high, high_bad)
+
+    if np.count_nonzero(fg) > 8 and np.count_nonzero(~fg) > 8:
+        fg_median = float(np.median(gray_u8[fg]))
+        bg_median = float(np.median(gray_u8[~fg]))
+        contrast_delta = abs(fg_median - bg_median)
+    else:
+        contrast_delta = 0.0
+    contrast_score = _score_more_is_better(contrast_delta, 12.0, 58.0)
+
+    gap_q20, gap_cv = _gap_statistics_for_rows(rows, boxes_x, boxes_w, boxes_w) if n_blob else (0.0, 1.0)
+    char_gap_score = _score_more_is_better(gap_q20, -0.05, 0.30)
+
+    tiny_ratio = 1.0
+    if n_blob:
+        tiny_area = max(6.0, float(np.median(areas_arr)) * 0.10)
+        tiny_ratio = float(np.count_nonzero(areas_arr < tiny_area) / max(1, n_blob))
+    fragment_score = _score_less_is_better(tiny_ratio, 0.06, 0.35)
+
+    visibility_axis = _clamp01(
+        0.40 * char_size_score
+        + 0.27 * contrast_score
+        + 0.20 * char_gap_score
+        + 0.13 * fragment_score
+    )
+
+    size_cv = _robust_cv(boxes_h.astype(np.float64)) if boxes_h.size else 1.0
+    size_var_score = _score_less_is_better(size_cv, 0.10, 0.42)
+
+    line_straight_score = float(horizontalness)
+    if writing_direction == "vertical":
+        line_straight_score = _vertical_straightness(columns, cx, boxes_w)
+        gap_cv = _column_gap_cv(columns, cx)
+    elif writing_direction == "mixed":
+        vertical_score = _vertical_straightness(columns, cx, boxes_w)
+        line_straight_score = max(float(horizontalness), vertical_score)
+        gap_cv = min(gap_cv, _column_gap_cv(columns, cx))
+    gap_cv_score = _score_less_is_better(gap_cv, 0.18, 0.75)
+    stability_axis = _clamp01(0.35 * size_var_score + 0.40 * line_straight_score + 0.25 * gap_cv_score)
+
+    line_gap_values = _line_gap_ratios(line_boxes)
+    block_sep_raw = _percentile(line_gap_values, 20.0, 0.65)
+    block_separation_score = _score_more_is_better(block_sep_raw, 0.12, 0.62)
+
+    overlap_raw = _max_box_overlap(line_boxes)
+    block_overlap_score = _score_less_is_better(overlap_raw, 0.01, 0.15)
+
+    if line_boxes:
+        lefts = np.array([b.x for b in line_boxes], dtype=np.float64)
+        edge_disp = 1.4826 * float(np.median(np.abs(lefts - np.median(lefts)))) / max(1.0, float(w))
+    else:
+        edge_disp = 0.08
+    edge_alignment_score = _score_less_is_better(edge_disp, 0.018, 0.095)
+
+    hierarchy_score = 0.72
+    if line_boxes:
+        line_heights = np.array([b.height for b in line_boxes], dtype=np.float64)
+        ratio = float(np.max(line_heights) / max(1.0, np.median(line_heights)))
+        hierarchy_score = 0.62 + 0.38 * _score_more_is_better(ratio, 1.02, 1.35)
+
+    block_axis = _clamp01(
+        0.40 * block_separation_score
+        + 0.20 * block_overlap_score
+        + 0.17 * edge_alignment_score
+        + 0.23 * hierarchy_score
+    )
+
+    local_crowding = _grid_local_crowding(mask_eval, median_h)
+    crowding_score = _score_less_is_better(local_crowding, 0.34, 0.68)
+
+    line_whitespace = _score_more_is_better(_percentile(line_gap_values, 20.0, 0.45), 0.08, 0.45)
+    if writing_direction == "vertical":
+        line_whitespace = gap_cv_score
+
+    edge_contact_ratio = 1.0
+    if n_blob:
+        edge_margin_x = 0.025 * float(w)
+        edge_margin_y = 0.025 * float(h)
+        contacts = (
+            (boxes_x <= edge_margin_x)
+            | (boxes_y <= edge_margin_y)
+            | ((boxes_x + boxes_w) >= (float(w) - edge_margin_x))
+            | ((boxes_y + boxes_h) >= (float(h) - edge_margin_y))
+        )
+        edge_contact_ratio = float(np.count_nonzero(contacts) / max(1, n_blob))
+    edge_contact_score = _score_less_is_better(edge_contact_ratio, 0.02, 0.22)
+
+    margin_axis = _clamp01(0.50 * crowding_score + 0.25 * line_whitespace + 0.25 * edge_contact_score)
+
+    weights = _BOARD_TYPE_WEIGHTS.get(str(board_type), _BOARD_TYPE_WEIGHTS["lecture"])
+    overall = _clamp01(
+        weights[0] * visibility_axis
+        + weights[1] * stability_axis
+        + weights[2] * block_axis
+        + weights[3] * margin_axis
+    )
+
+    caps: list[str] = []
+    if visibility_axis < 0.30:
+        overall = min(overall, 0.59)
+        caps.append("visibility_under_30")
+    if size_ratio < low_bad:
+        overall = min(overall, 0.64)
+        caps.append("major_text_too_small")
+    if overlap_raw >= 0.15:
+        overall = min(overall, 0.69)
+        caps.append("block_overlap_over_15_percent")
+
+    component_confidence = _score_more_is_better(float(n_blob), 6.0, 24.0)
+    line_confidence = _score_more_is_better(float(len(line_boxes)), 1.0, 3.0)
+    confidence = _clamp01(0.42 * component_confidence + 0.28 * line_confidence + 0.18 * capture_visibility + 0.12 * contrast_score)
+
+    notes: list[str] = []
+    if confidence < 0.50:
+        notes.append("画像処理で拾えた文字量が少ないため、点数の信頼度は低めです。明るさと黒板全体の収まりを確認してください。")
+    if char_size_score < 0.55:
+        notes.append("文字サイズが基準から外れています。遠くから読める大きさを意識すると改善しやすいです。")
+    if char_gap_score < 0.55:
+        notes.append("文字間が詰まり気味の部分があります。半文字分の余白を足す意識で書くと読みやすくなります。")
+    if line_straight_score < 0.55:
+        notes.append("行または列の流れに傾きが見られます。1行書いたら少し下がって高さを確認してください。")
+    if local_crowding >= 0.62:
+        notes.append("局所的に文字や線が密集しています。全体量ではなく、接触している部分を少し離すのが効果的です。")
+
+    display_score = int(np.clip(round(overall * 100.0 / 5.0) * 5, 0, 100))
+    axes = FixedRuleAxisScores(
+        visibility=visibility_axis,
+        stability=stability_axis,
+        block_organization=block_axis,
+        margin_interference=margin_axis,
+    )
+    return FixedRuleScoring(
+        board_type=board_type,
+        writing_direction=writing_direction,
+        axes=axes,
+        overall=overall,
+        display_score=display_score,
+        confidence=confidence,
+        density_ratio=fg_ratio,
+        density_label=_label_density(fg_ratio),
+        local_crowding=local_crowding,
+        local_crowding_label=_label_crowding(local_crowding),
+        caps=caps,
+        notes=notes,
+    )
 
 
 def default_guide(w: int, h: int) -> GridGuide:
@@ -302,7 +660,12 @@ def _suppress_outer_border(mask: np.ndarray, margin_ratio: float = 0.02) -> np.n
     return out
 
 
-def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationResult:
+def compute_metrics(
+    mask: np.ndarray,
+    gray_u8: np.ndarray,
+    board_type: BlackboardType = "lecture",
+    writing_direction: WritingDirection = "horizontal",
+) -> MetricComputationResult:
     """mask: 前景 255 の 1ch。gray_u8: 同一解像度のグレースケール。"""
     h, w = int(mask.shape[0]), int(mask.shape[1])
     metric_notes: list[str] = []
@@ -365,13 +728,18 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
 
     baseline_y_positions: list[float] = []
 
-    heights_arr = np.array(boxes_h, dtype=np.float64)
-    widths_arr = np.array(boxes_w, dtype=np.float64)
+    boxes_x_arr = np.array(boxes_x, dtype=np.float64)
+    boxes_y_arr = np.array(boxes_y, dtype=np.float64)
+    boxes_w_arr = np.array(boxes_w, dtype=np.float64)
+    boxes_h_arr = np.array(boxes_h, dtype=np.float64)
+    heights_arr = boxes_h_arr
+    widths_arr = boxes_w_arr
     areas_arr = np.array(areas, dtype=np.float64)
     cx = np.array(cx_s, dtype=np.float64)
     cy = np.array(cy_s, dtype=np.float64)
 
     rows = _cluster_rows(cy, heights_arr.astype(np.float64))
+    columns = _cluster_rows(cx, widths_arr.astype(np.float64))
 
     # 行ごとベースライン（下端の加重最大に近い：マスク下端の代表的 y）
     for row_idx in rows:
@@ -469,6 +837,29 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
         + 0.06 * visibility
     )
 
+    scoring = _compute_fixed_rule_scoring(
+        mask_eval,
+        gray_u8,
+        board_type=board_type,
+        writing_direction=writing_direction,
+        line_boxes=line_boxes,
+        rows=rows,
+        columns=columns,
+        boxes_x=boxes_x_arr,
+        boxes_y=boxes_y_arr,
+        boxes_w=boxes_w_arr,
+        boxes_h=boxes_h_arr,
+        areas_arr=areas_arr,
+        cx=cx,
+        cy=cy,
+        horizontalness=line_alignment,
+        spacing_uniformity=spacing_balance,
+        size_consistency=size_consistency,
+        stroke_quality=stroke_quality,
+        capture_visibility=visibility,
+    )
+    metric_notes.extend(scoring.notes)
+
     if stroke_quality < 0.58:
         metric_notes.append("線が薄い・かすれる・ノイズが多い可能性があります。線の濃さや撮影距離を調整してください。")
     if line_alignment < 0.55:
@@ -521,6 +912,7 @@ def compute_metrics(mask: np.ndarray, gray_u8: np.ndarray) -> MetricComputationR
 
     return MetricComputationResult(
         scores=scores,
+        scoring=scoring,
         baseline_y_positions=sorted(baseline_y_positions),
         char_boxes=char_boxes,
         guide=guide,

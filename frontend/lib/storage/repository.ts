@@ -12,7 +12,7 @@ function randomId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export async function createSession(memo: string | null): Promise<PracticeSession> {
+export async function createSession(memo: string | null, albumName: string | null = null): Promise<PracticeSession> {
   const db = await openPracticeDb();
   const now = nowIso();
   const session: PracticeSession = {
@@ -20,6 +20,7 @@ export async function createSession(memo: string | null): Promise<PracticeSessio
     createdAt: now,
     updatedAt: now,
     memo: memo?.trim() || null,
+    albumName: albumName?.trim() || null,
   };
   await db.put("sessions", session);
   return session;
@@ -27,6 +28,7 @@ export async function createSession(memo: string | null): Promise<PracticeSessio
 
 export async function createSessionWithAttempt(args: {
   memo: string | null;
+  albumName?: string | null;
   imageBlob: Blob;
   imageMimeType: string;
   originalFilename?: string | null;
@@ -38,6 +40,7 @@ export async function createSessionWithAttempt(args: {
     createdAt: now,
     updatedAt: now,
     memo: args.memo?.trim() || null,
+    albumName: args.albumName?.trim() || null,
   };
   const attempt: PracticeAttempt = {
     id: randomId("att"),
@@ -70,6 +73,15 @@ export async function updateSessionMemo(sessionId: string, memo: string | null):
   const current = await db.get("sessions", sessionId);
   if (!current) return;
   current.memo = memo?.trim() || null;
+  current.updatedAt = nowIso();
+  await db.put("sessions", current);
+}
+
+export async function updateSessionAlbumName(sessionId: string, albumName: string | null): Promise<void> {
+  const db = await openPracticeDb();
+  const current = await db.get("sessions", sessionId);
+  if (!current) return;
+  current.albumName = albumName?.trim() || null;
   current.updatedAt = nowIso();
   await db.put("sessions", current);
 }
