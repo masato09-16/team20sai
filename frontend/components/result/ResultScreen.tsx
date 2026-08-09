@@ -7,6 +7,7 @@ import { AlertCircle, ArrowRightLeft, Award, Clock3, Lightbulb, Loader2, Refresh
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
 import { PracticeSteps } from "@/components/practice/PracticeSteps";
+import { ReferenceOverlayPanel } from "@/components/result/ReferenceOverlayPanel";
 import { DetailPageSkeleton } from "@/components/ui/PageSkeletons";
 import {
   captureAndRecognitionHints,
@@ -104,6 +105,8 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
       : [];
   const comparableCount = allAttempts.filter((a) => a.analysisStatus === "completed" && a.analysisResult).length;
   const canCompare = comparableCount >= 2;
+  const referenceText = correctedText.trim() || result?.recognized_text?.trim() || "";
+  const writingDirection = result?.scoring?.writing_direction ?? "horizontal";
 
   const rerunAnalysis = useCallback(
     async (withCorrection: boolean) => {
@@ -186,7 +189,14 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
         <p className="text-sm text-stone-600">{formatDateTime(attempt.createdAt)}</p>
       </header>
 
-      {imageUrl ? (
+      {imageUrl && result ? (
+        <ReferenceOverlayPanel
+          imageUrl={imageUrl}
+          referenceText={referenceText}
+          overlay={result.overlay}
+          writingDirection={writingDirection}
+        />
+      ) : imageUrl ? (
         <div className="overflow-hidden rounded-lg border border-stone-300 bg-black">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl} alt="保存した板書画像" className="mx-auto block max-h-[56vh] w-full object-contain" />
@@ -363,8 +373,8 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
             </div>
           </div>
 
-          <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50 p-3">
-            <h3 className="text-sm font-semibold text-stone-700">読み取った文字を確認する（補助）</h3>
+          <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+            <h3 className="text-sm font-semibold text-sky-900">お手本に使う文字</h3>
             <p className="text-xs text-stone-500">
               OCR 結果が違う場合は修正して確認し直せます。主評価は文字の見やすさです。
             </p>
