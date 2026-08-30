@@ -121,7 +121,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       const session = await getSession(initialSessionId);
       if (!mounted) return;
       if (session?.memo) setMemo(session.memo);
-      // セッションに既存のアルバム名があればセットする
       if (session?.albumName) {
         setSelectedAlbum(session.albumName);
       }
@@ -135,7 +134,6 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     };
   }, [initialSessionId, stopCamera]);
 
-  // ★ 新しいアルバムを追加する処理
   const handleCreateAlbum = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newAlbumName.trim();
@@ -311,17 +309,21 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   const hasSelectedImage = Boolean(pendingImage);
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-5 text-white">
       <PracticeSteps current={1} />
+      
+      {/* 見出しと説明文（白文字・明るいエメラルドに変更） */}
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">{hasSelectedImage ? "この写真で診断しますか？" : "黒板写真を1枚用意する"}</h1>
-        <p className="text-sm text-stone-600">
+        <h1 className="text-2xl font-bold text-white drop-shadow-sm">
+          {hasSelectedImage ? "この写真で診断しますか？" : "黒板写真を1枚用意する"}
+        </h1>
+        <p className="text-sm text-emerald-100/90 leading-relaxed">
           {hasSelectedImage ? "写真を確認して、診断結果へ進みましょう。" : "登録なしで診断できます。まずは黒板全体が入った写真を撮るか選んでください。"}
         </p>
       </header>
 
       {!pendingImage ? (
-        <div className="ui-card p-4">
+        <div className="ui-card p-4 text-stone-800">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800">
             <ShieldCheck className="h-4 w-4 text-teal-700" />
             きれいに診断するコツ
@@ -335,7 +337,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
         </div>
       ) : null}
 
-      <div className="ui-card space-y-3 p-4">
+      <div className="ui-card space-y-3 p-4 text-stone-800">
         <input
           ref={fileInputRef}
           type="file"
@@ -476,8 +478,9 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
         ) : null}
       </div>
 
+      {/* 板書の内容メモ（ラベルを明るいエメラルド色に変更） */}
       <div className="space-y-2">
-        <label htmlFor="memo" className="block text-sm font-medium text-stone-700">
+        <label htmlFor="memo" className="block text-sm font-bold text-emerald-200">
           板書の内容メモ（任意）
         </label>
         <textarea
@@ -485,13 +488,13 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
           rows={2}
-          className="ui-input w-full resize-y px-3 py-2 text-sm placeholder:text-stone-400"
+          className="ui-input w-full resize-y px-3 py-2 text-sm placeholder:text-stone-400 text-stone-800"
           placeholder="例：二次方程式の解の公式"
           disabled={isBusy || isStartingCamera}
         />
       </div>
 
-      <details className="ui-card p-4">
+      <details className="ui-card p-4 text-stone-800">
         <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold text-stone-800">
           <span className="flex items-center gap-2">
             <Folder className="h-4 w-4 text-teal-700" />

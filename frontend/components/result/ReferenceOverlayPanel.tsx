@@ -107,7 +107,7 @@ export function ReferenceOverlayPanel({
   return (
     <section className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-sm font-semibold text-stone-800">板書とお手本</h2>
+        <h2 className="text-sm font-bold text-emerald-200">板書とお手本</h2>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"

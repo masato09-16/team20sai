@@ -185,8 +185,8 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
     <section className="space-y-5">
       <PracticeSteps current={2} canCompare={canCompare} />
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">今回の振り返り</h1>
-        <p className="text-sm text-stone-600">{formatDateTime(attempt.createdAt)}</p>
+        <h1 className="text-2xl font-bold text-white drop-shadow-sm">今回の振り返り</h1>
+        <p className="text-sm font-medium text-emerald-100/90">{formatDateTime(attempt.createdAt)}</p>
       </header>
 
       {imageUrl && result ? (

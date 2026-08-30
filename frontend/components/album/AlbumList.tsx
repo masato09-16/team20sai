@@ -89,7 +89,7 @@ export function AlbumList() {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">練習アルバム</h1>
+        <h1 className="text-2xl font-semibold text-white drop-shadow-sm">練習アルバム</h1>
       </header>
 
       <div className="ui-card-compact flex items-center gap-2 p-2">

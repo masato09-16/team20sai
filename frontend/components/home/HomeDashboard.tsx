@@ -1,282 +1,197 @@
 "use client";
 
 import Link from "next/link";
-import {
-  BarChart3,
-  BookOpenCheck,
-  Camera,
-  Clock3,
-  ClipboardCheck,
-  FolderPlus,
-  Layers3,
-  ShieldCheck,
-  Sparkles,
-  Target,
+import { 
+  Camera, 
+  BarChart3, 
+  Sparkles, 
+  ChevronRight, 
+  Sprout 
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-
-import { EmptyState } from "@/components/ui/EmptyState";
-import { CardListSkeleton } from "@/components/ui/PageSkeletons";
-import { resultDisplayScore } from "@/lib/evaluation/viewModel";
-import { listAttemptsBySession, listSessions } from "@/lib/storage/repository";
-import type { PracticeAttempt, PracticeSession } from "@/lib/storage/types";
-import { formatDateTime } from "@/lib/ui/format";
-
-type RecentRow = {
-  session: PracticeSession;
-  latestAttempt: PracticeAttempt | null;
-};
-
-const FEATURE_TILES = [
-  {
-    icon: ClipboardCheck,
-    title: "5軸で採点",
-    description: "読みやすさ、行、サイズ、間隔、線を見ます。",
-    tone: "mint",
-  },
-  {
-    icon: Layers3,
-    title: "お手本を重ねる",
-    description: "自分の文字の上に薄く表示して、形と行のズレを見比べられます。",
-    tone: "violet",
-  },
-  {
-    icon: Target,
-    title: "次の練習が分かる",
-    description: "弱い項目に合わせた3分メニューを出します。",
-    tone: "gold",
-  },
-] as const;
-
-const PREVIEW_BARS = [
-  { label: "読みやすさ", value: 82, className: "bg-brand" },
-  { label: "行の揃い方", value: 68, className: "bg-violet-500" },
-  { label: "間隔", value: 74, className: "bg-amber-400" },
-] as const;
-
-function parseAlbumOptions(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem("bansho_albums") || "[]");
-    const saved = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
-    return Array.from(new Set(["未分類", ...saved]));
-  } catch {
-    return ["未分類"];
-  }
-}
 
 export function HomeDashboard() {
-  const [rows, setRows] = useState<RecentRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [albumOptions, setAlbumOptions] = useState<string[]>(["未分類"]);
-  const [newAlbumName, setNewAlbumName] = useState("");
-
-  useEffect(() => {
-    let mounted = true;
-    const run = async () => {
-      try {
-        setAlbumOptions(parseAlbumOptions());
-        const sessions = await listSessions(5);
-        const pairs = await Promise.all(
-          sessions.map(async (s) => {
-            const attempts = await listAttemptsBySession(s.id);
-            return { session: s, latestAttempt: attempts[attempts.length - 1] ?? null };
-          }),
-        );
-        if (mounted) setRows(pairs);
-      } catch {
-        if (mounted) setLoadError("保存した練習を読み込めませんでした。");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    void run();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const handleCreateAlbum = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newAlbumName.trim();
-    if (!trimmed || albumOptions.includes(trimmed)) return;
-
-    const updatedAlbums = [...albumOptions, trimmed];
-    setAlbumOptions(updatedAlbums);
-    localStorage.setItem("bansho_albums", JSON.stringify(updatedAlbums));
-    setNewAlbumName("");
+  const stats = {
+    overallScore: 82,
+    readability: 82,
+    lineAlignment: 68,
+    spacing: 74,
   };
 
-  const hasRows = rows.length > 0;
-  const latest = useMemo(() => rows[0] ?? null, [rows]);
-
   return (
-    <section className="space-y-5">
-      <header className="ui-hero-panel overflow-hidden p-5 sm:p-6">
-        <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
-          <div className="space-y-5">
-            <div className="space-y-3">
-              <p className="ui-kicker">黒板文字のセルフ診断</p>
-              <h1 className="text-3xl font-bold leading-tight text-stone-900 sm:text-4xl">
-                板書練習ノート
-              </h1>
-              <p className="max-w-xl text-sm leading-6 text-stone-600 sm:text-base">
-                写真を1枚選ぶだけで、読みやすさ・行の揃い方・余白を見える化。結果画面ではお手本を重ねて、書き直す場所まで確認できます。
-              </p>
-            </div>
+    <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 text-white">
+      
+      {/* 1. ヒーローセクション */}
+      <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white drop-shadow-sm sm:text-4xl">
+            書く力を、<br />
+            確かなチカラに。
+          </h1>
+          <p className="mt-2 text-sm text-emerald-100/90 leading-relaxed sm:text-base">
+            板書練習ノートは、写真で手書き文字を読み取り、<br />
+            5軸で診断してあなたの練習をサポートします。
+          </p>
+        </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Link href="/practice/new" className="ui-button-primary min-h-12 flex-1 text-base">
-                <Camera className="h-5 w-5" />
-                写真で診断する
-              </Link>
-              <Link href="/album" className="ui-button-quiet min-h-12 flex-1">
-                <BookOpenCheck className="h-4 w-4" />
-                練習記録を見る
-              </Link>
-            </div>
-
-          </div>
-
-          <div className="ui-hero-visual">
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-sm text-white">
-              <span className="inline-flex items-center gap-2 font-semibold">
-                <Sparkles className="h-4 w-4 text-[#f4c95d]" />
-                診断プレビュー
+        {/* 黒板イラスト */}
+        <div className="flex items-center justify-center self-center md:mr-6 md:self-auto">
+          <div className="relative h-28 w-56 sm:h-32 sm:w-64 rounded-xl border-4 border-amber-950 bg-[#143520] p-1.5 shadow-2xl">
+            {/* 黒板の内枠ライン */}
+            <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border border-emerald-500/30 bg-[#1b432a]">
+              <span className="font-serif text-3xl sm:text-4xl font-extrabold tracking-widest text-emerald-50 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">
+                板書
               </span>
-              <span className="rounded-full bg-white/15 px-2.5 py-1 text-xs">82点</span>
+              <div className="mt-1.5 h-0.5 w-20 bg-amber-200/70 rounded-full" />
             </div>
-            <div className="space-y-4 p-4">
-              <div className="ui-preview-board" aria-label="お手本文字: 板書太郎">
-                <p className="ui-preview-chalk">板書太郎</p>
-                <div className="pointer-events-none absolute inset-x-6 bottom-7 h-1 rounded-full bg-[#f4c95d]/75" />
-              </div>
-              <div className="space-y-3">
-                {PREVIEW_BARS.map((item) => (
-                  <div key={item.label} className="grid grid-cols-[5.5rem_1fr_2.5rem] items-center gap-2 text-xs text-white/80">
-                    <span>{item.label}</span>
-                    <span className="h-2 overflow-hidden rounded-full bg-white/15">
-                      <span className={`block h-full rounded-full ${item.className}`} style={{ width: `${item.value}%` }} />
-                    </span>
-                    <span className="text-right font-semibold text-white">{item.value}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:col-span-2">
-            {FEATURE_TILES.map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.title} className={`ui-feature-tile is-${item.tone}`}>
-                  <Icon className="h-4 w-4" />
-                  <p className="mt-2 text-sm font-semibold text-stone-800">{item.title}</p>
-                  <p className="mt-1 text-xs leading-5 text-stone-600">{item.description}</p>
-                </div>
-              );
-            })}
+            {/* チョーク受け */}
+            <div className="absolute -bottom-2.5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded bg-amber-950 px-4 py-0.5 shadow-md">
+              <div className="h-1.5 w-5 rounded-full bg-white shadow-sm" />
+              <div className="h-1.5 w-3.5 rounded-full bg-amber-300 shadow-sm" />
+              <div className="h-1.5 w-3.5 rounded-full bg-red-400 shadow-sm" />
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Link href={latest ? `/practice/new?sessionId=${latest.session.id}` : "/practice/new"} className="ui-button-secondary">
-          <Clock3 className="h-4 w-4" />
-          {latest ? "前回の続きを練習する" : "短い練習から始める"}
-        </Link>
-        <Link href="/album" className="ui-button-quiet">
-          保存した練習を見る
+      {/* 2. メインCTAボタン */}
+      <div>
+        <Link
+          href="/practice/new"
+          className="group relative flex min-h-[120px] items-center justify-between overflow-hidden rounded-2xl border border-emerald-400/30 bg-gradient-to-r from-emerald-600 via-teal-600 to-teal-700 p-6 text-white shadow-lg transition-transform hover:-translate-y-1 hover:shadow-xl sm:p-8"
+        >
+          <div className="flex items-center gap-6">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white text-teal-700 shadow-md sm:h-20 sm:w-20">
+              <Camera className="h-8 w-8 sm:h-10 sm:w-10" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold tracking-wide sm:text-2xl">今すぐ写真で診断する</h2>
+              <p className="text-xs font-medium text-emerald-100 sm:text-sm">板書を撮るだけで、すぐに診断・フィードバック</p>
+            </div>
+          </div>
+          <ChevronRight className="h-8 w-8 text-emerald-200 transition-transform group-hover:translate-x-1.5" />
         </Link>
       </div>
 
-      <section className="ui-card p-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-          <ShieldCheck className="h-4 w-4 text-brand" />
-          初回でも迷わない流れ
-        </h2>
-        <ol className="mt-3 grid grid-cols-1 gap-2 text-sm text-stone-700 sm:grid-cols-4">
-          {["写真を撮る", "診断を見る", "お手本を重ねる", "書き直して比べる"].map((label, index) => (
-            <li key={label} className="ui-process-step">
-              <span>{index + 1}</span>
-              <p>{label}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="ui-card p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-            <BarChart3 className="h-4 w-4 text-sky-600" />
-            最近の練習
-          </h2>
-          {hasRows ? <span className="text-xs text-stone-500">最新5件</span> : null}
+      {/* 3. あなたの練習状況 */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-emerald-200">
+          <BarChart3 className="h-4 w-4 text-emerald-300" />
+          <h2>あなたの練習状況</h2>
         </div>
-        {loadError ? <p className="mt-3 text-sm text-orange-700">{loadError}</p> : null}
-        {loading ? (
-          <div className="mt-3">
-            <CardListSkeleton count={3} />
-          </div>
-        ) : null}
-        {!loading && !hasRows ? (
-          <div className="mt-3">
-            <EmptyState
-              icon={Camera}
-              title="まだ練習記録はありません"
-              description="最初の1枚を診断すると、ここに書き直しの記録が積み上がります。"
-              action={
-                <Link href="/practice/new" className="ui-button-secondary">
-                  写真を診断する
-                </Link>
-              }
-            />
-          </div>
-        ) : null}
-        {!loading && hasRows ? (
-          <ul className="mt-3 space-y-2">
-            {rows.map(({ session, latestAttempt }) => {
-              const summary =
-                latestAttempt?.analysisResult && latestAttempt.analysisStatus === "completed"
-                  ? `${resultDisplayScore(latestAttempt.analysisResult)}点`
-                  : latestAttempt?.analysisStatus === "error"
-                    ? "解析エラー"
-                    : "解析待ち";
-              return (
-                <li key={session.id}>
-                  <Link href={`/album/${session.id}`} className="ui-link-card flex items-center justify-between px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-stone-800">{session.memo?.trim() || "メモ未入力の練習"}</p>
-                      <p className="text-xs text-stone-500">{formatDateTime(session.updatedAt)}</p>
-                    </div>
-                    <span className="text-sm font-semibold text-brand">{summary}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
-      </section>
 
-      <details className="ui-card p-4">
-        <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-stone-800">
-          <FolderPlus className="h-4 w-4 text-violet-600" />
-          記録整理用のアルバムを作る
-        </summary>
-        <form onSubmit={handleCreateAlbum} className="mt-3 flex gap-2">
-          <input
-            type="text"
-            value={newAlbumName}
-            onChange={(e) => setNewAlbumName(e.target.value)}
-            placeholder="例：教育実習、数学板書など"
-            className="ui-input min-w-0 flex-1 px-3 py-2 text-sm"
-          />
-          <button type="submit" className="ui-button-primary min-h-10 px-4 py-2">
-            作成
-          </button>
-        </form>
-      </details>
-    </section>
+        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-stone-200 bg-white p-6 text-stone-800 shadow-md md:grid-cols-12 md:items-center">
+          
+          {/* 左：全体の総合スコア */}
+          <div className="flex items-center gap-5 border-b border-stone-100 pb-4 md:col-span-4 md:border-b-0 md:border-r md:pb-0 md:pr-4">
+            <div className="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-4 border-emerald-500 bg-emerald-50/50">
+              <span className="text-xl font-black text-stone-800">{stats.overallScore}%</span>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-stone-500">全体の総合スコア</p>
+              <p className="text-2xl font-black text-stone-800">{stats.overallScore} <span className="text-sm font-normal text-stone-500">/ 100</span></p>
+            </div>
+          </div>
+
+          {/* 中央：バーグラフ */}
+          <div className="space-y-3 border-b border-stone-100 pb-4 md:col-span-5 md:border-b-0 md:border-r md:pb-0 md:px-4">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 shrink-0 font-medium text-stone-600">読みやすさ</span>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${stats.readability}%` }} />
+              </div>
+              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.readability}%</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 shrink-0 font-medium text-stone-600">行の揃い方</span>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
+                <div className="h-full rounded-full bg-purple-500" style={{ width: `${stats.lineAlignment}%` }} />
+              </div>
+              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.lineAlignment}%</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-16 shrink-0 font-medium text-stone-600">間隔</span>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
+                <div className="h-full rounded-full bg-amber-400" style={{ width: `${stats.spacing}%` }} />
+              </div>
+              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.spacing}%</span>
+            </div>
+          </div>
+
+          {/* 右：メッセージ */}
+          <div className="flex items-start gap-3 md:col-span-3 md:pl-2">
+            <Sprout className="h-7 w-7 shrink-0 text-emerald-600" />
+            <div>
+              <p className="text-xs font-bold text-stone-800">少しずつで、<br />確実に上達しています！</p>
+              <p className="mt-1 text-[11px] leading-snug text-stone-500">このまま、自分のペースでがんばりましょう。</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* 4. 練習の流れ（ステップ形式） */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-emerald-200">
+          <Sparkles className="h-4 w-4 text-emerald-300" />
+          <h2>初回でも迷わない練習の流れ</h2>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-md sm:p-5">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+            
+            {/* ① 写真を撮る */}
+            <Link
+              href="/practice/new"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+            >
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+                1
+              </div>
+              <span className="text-sm font-bold text-stone-700">写真を撮る</span>
+            </Link>
+
+            {/* ② 診断を見る */}
+            <Link
+              href="/album"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+            >
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+                2
+              </div>
+              <span className="text-sm font-bold text-stone-700">診断を見る</span>
+            </Link>
+
+            {/* ③ お手本を重ねる */}
+            <Link
+              href="/album"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+            >
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+                3
+              </div>
+              <span className="text-sm font-bold text-stone-700">お手本を重ねる</span>
+            </Link>
+
+            {/* ④ 書き直して比べる */}
+            <Link
+              href="/album"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+            >
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+                4
+              </div>
+              <span className="text-sm font-bold text-stone-700">書き直して比べる</span>
+            </Link>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
   );
 }
+
+export default HomeDashboard;

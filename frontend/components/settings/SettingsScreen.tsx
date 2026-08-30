@@ -28,7 +28,7 @@ export function SettingsScreen() {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">設定・データ管理</h1>
+        <h1 className="text-2xl font-semibold text-white drop-shadow-sm">設定・データ管理</h1>
       </header>
 
       <div className="ui-card space-y-3 p-4">

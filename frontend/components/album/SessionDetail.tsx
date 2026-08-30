@@ -167,9 +167,9 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-stone-800">練習の記録</h1>
-        <p className="text-sm text-stone-600">{formatDateTime(session.updatedAt)}</p>
-      </header>
+  <h1 className="text-2xl font-bold text-white drop-shadow-sm">練習の記録</h1>
+  <p className="text-sm font-medium text-emerald-100/90">{formatDateTime(session.createdAt)}</p>
+</header>
       {error ? (
         <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">{error}</p>
       ) : null}
