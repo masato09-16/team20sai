@@ -132,7 +132,7 @@ export function HomeDashboard() {
         </div>
       </div>
 
-      {/* 4. 練習の流れ（ステップ形式） */}
+      {/* 4. 練習の流れ（3ステップに整理） */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-emerald-200">
           <Sparkles className="h-4 w-4 text-emerald-300" />
@@ -140,14 +140,14 @@ export function HomeDashboard() {
         </div>
 
         <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-md sm:p-5">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             
             {/* ① 写真を撮る */}
             <Link
               href="/practice/new"
-              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
             >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
                 1
               </div>
               <span className="text-sm font-bold text-stone-700">写真を撮る</span>
@@ -156,32 +156,21 @@ export function HomeDashboard() {
             {/* ② 診断を見る */}
             <Link
               href="/album"
-              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
             >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
                 2
               </div>
               <span className="text-sm font-bold text-stone-700">診断を見る</span>
             </Link>
 
-            {/* ③ お手本を重ねる */}
+            {/* ③ 書き直して比べる */}
             <Link
               href="/album"
-              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
+              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
             >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
                 3
-              </div>
-              <span className="text-sm font-bold text-stone-700">お手本を重ねる</span>
-            </Link>
-
-            {/* ④ 書き直して比べる */}
-            <Link
-              href="/album"
-              className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
-            >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white shadow-sm">
-                4
               </div>
               <span className="text-sm font-bold text-stone-700">書き直して比べる</span>
             </Link>

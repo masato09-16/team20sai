@@ -189,17 +189,13 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
         <p className="text-sm font-medium text-emerald-100/90">{formatDateTime(attempt.createdAt)}</p>
       </header>
 
-      {imageUrl && result ? (
-        <ReferenceOverlayPanel
-          imageUrl={imageUrl}
-          referenceText={referenceText}
-          overlay={result.overlay}
-          writingDirection={writingDirection}
-        />
-      ) : imageUrl ? (
-        <div className="overflow-hidden rounded-lg border border-stone-300 bg-black">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt="保存した板書画像" className="mx-auto block max-h-[56vh] w-full object-contain" />
+      {imageUrl ? (
+        <div className="space-y-2">
+          <h2 className="text-sm font-bold text-emerald-200">撮影した板書写真</h2>
+          <div className="overflow-hidden rounded-xl border-2 border-stone-300 bg-black shadow-md">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageUrl} alt="保存した板書画像" className="mx-auto block max-h-[56vh] w-full object-contain" />
+          </div>
         </div>
       ) : null}
 
