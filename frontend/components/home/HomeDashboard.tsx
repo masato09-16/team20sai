@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { 
   Camera, 
@@ -9,13 +10,62 @@ import {
   Sprout 
 } from "lucide-react";
 
+interface PracticeStats {
+  hasData: boolean;
+  totalCount: number;
+  overallScore: number;
+  title: string;
+  subtitle: string;
+}
+
 export function HomeDashboard() {
-  const stats = {
-    overallScore: 82,
-    readability: 82,
-    lineAlignment: 68,
-    spacing: 74,
-  };
+  const [stats, setStats] = useState<PracticeStats>({
+    hasData: false,
+    totalCount: 0,
+    overallScore: 0,
+    title: "まずは1枚写真を撮って、",
+    subtitle: "診断してみましょう！",
+  });
+
+  useEffect(() => {
+    try {
+      const rawData = localStorage.getItem("bansho_history");
+      if (!rawData) return;
+
+      const records = JSON.parse(rawData);
+      if (!Array.isArray(records) || records.length === 0) return;
+
+      const count = records.length;
+      let sumOverall = 0;
+
+      records.forEach((r: any) => {
+        sumOverall += Number(r.display_score ?? r.overall_score ?? r.score ?? 0);
+      });
+
+      const avgOverall = Math.round(sumOverall / count);
+
+      let title = "少しずつで、\n確実に上達しています！";
+      let subtitle = "このまま、自分のペースでがんばりましょう。";
+
+      if (avgOverall >= 80) {
+        title = "素晴らしい安定感！\n高い完成度を維持しています";
+        subtitle = "教室の隅からでもよく伝わる見事な板書です。";
+      } else if (avgOverall < 60) {
+        title = "文字と行のバランスを\n意識してみましょう！";
+        subtitle = "診断のアドバイスを参考に書き直してみましょう。";
+      }
+
+      setStats({
+        hasData: true,
+        totalCount: count,
+        overallScore: avgOverall,
+        title,
+        subtitle,
+      });
+    } catch (error) {
+      console.error("Failed to load bansho history:", error);
+    }
+  }, []);
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 text-white">
@@ -36,7 +86,6 @@ export function HomeDashboard() {
         {/* 黒板イラスト */}
         <div className="flex items-center justify-center self-center md:mr-6 md:self-auto">
           <div className="relative h-28 w-56 sm:h-32 sm:w-64 rounded-xl border-4 border-amber-950 bg-[#143520] p-1.5 shadow-2xl">
-            {/* 黒板の内枠ライン */}
             <div className="flex h-full w-full flex-col items-center justify-center rounded-lg border border-emerald-500/30 bg-[#1b432a]">
               <span className="font-serif text-3xl sm:text-4xl font-extrabold tracking-widest text-emerald-50 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]">
                 板書
@@ -44,7 +93,6 @@ export function HomeDashboard() {
               <div className="mt-1.5 h-0.5 w-20 bg-amber-200/70 rounded-full" />
             </div>
 
-            {/* チョーク受け */}
             <div className="absolute -bottom-2.5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded bg-amber-950 px-4 py-0.5 shadow-md">
               <div className="h-1.5 w-5 rounded-full bg-white shadow-sm" />
               <div className="h-1.5 w-3.5 rounded-full bg-amber-300 shadow-sm" />
@@ -73,66 +121,62 @@ export function HomeDashboard() {
         </Link>
       </div>
 
-      {/* 3. あなたの練習状況 */}
+      {/* 3. あなたの練習状況（バーグラフを廃止し、2カラム構成に最適化） */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-emerald-200">
           <BarChart3 className="h-4 w-4 text-emerald-300" />
-          <h2>あなたの練習状況</h2>
+          <h2>
+            あなたの練習状況
+            {stats.hasData && (
+              <span className="ml-2 text-xs font-normal text-emerald-200/80">
+                （計 {stats.totalCount} 回の平均）
+              </span>
+            )}
+          </h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-stone-200 bg-white p-6 text-stone-800 shadow-md md:grid-cols-12 md:items-center">
+        <div className="grid grid-cols-1 gap-6 rounded-2xl border border-stone-200 bg-white p-6 text-stone-800 shadow-md md:grid-cols-12 md:items-center">
           
           {/* 左：全体の総合スコア */}
-          <div className="flex items-center gap-5 border-b border-stone-100 pb-4 md:col-span-4 md:border-b-0 md:border-r md:pb-0 md:pr-4">
-            <div className="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-4 border-emerald-500 bg-emerald-50/50">
-              <span className="text-xl font-black text-stone-800">{stats.overallScore}%</span>
+          <div className="flex items-center gap-6 border-b border-stone-100 pb-5 md:col-span-6 md:border-b-0 md:border-r md:pb-0 md:pr-6">
+            <div className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full border-4 border-emerald-500 bg-emerald-50/50 shadow-inner">
+              <span className="text-2xl font-black text-stone-800">
+                {stats.hasData ? `${stats.overallScore}%` : "-"}
+              </span>
             </div>
-            <div>
-              <p className="text-xs font-semibold text-stone-500">全体の総合スコア</p>
-              <p className="text-2xl font-black text-stone-800">{stats.overallScore} <span className="text-sm font-normal text-stone-500">/ 100</span></p>
-            </div>
-          </div>
-
-          {/* 中央：バーグラフ */}
-          <div className="space-y-3 border-b border-stone-100 pb-4 md:col-span-5 md:border-b-0 md:border-r md:pb-0 md:px-4">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-16 shrink-0 font-medium text-stone-600">読みやすさ</span>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
-                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${stats.readability}%` }} />
-              </div>
-              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.readability}%</span>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-16 shrink-0 font-medium text-stone-600">行の揃い方</span>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
-                <div className="h-full rounded-full bg-purple-500" style={{ width: `${stats.lineAlignment}%` }} />
-              </div>
-              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.lineAlignment}%</span>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-16 shrink-0 font-medium text-stone-600">間隔</span>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
-                <div className="h-full rounded-full bg-amber-400" style={{ width: `${stats.spacing}%` }} />
-              </div>
-              <span className="w-8 shrink-0 text-right font-bold text-stone-700">{stats.spacing}%</span>
+            <div className="space-y-1">
+              <p className="text-xs font-bold tracking-wider text-stone-400 uppercase">総合スコア平均</p>
+              <p className="text-3xl font-black text-stone-800">
+                {stats.hasData ? stats.overallScore : "--"} 
+                <span className="text-base font-normal text-stone-500"> / 100</span>
+              </p>
+              {stats.hasData && (
+                <p className="text-xs text-emerald-700 font-medium">
+                  累計 {stats.totalCount} 回の練習データを反映中
+                </p>
+              )}
             </div>
           </div>
 
           {/* 右：メッセージ */}
-          <div className="flex items-start gap-3 md:col-span-3 md:pl-2">
-            <Sprout className="h-7 w-7 shrink-0 text-emerald-600" />
+          <div className="flex items-center gap-4 md:col-span-6 md:pl-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+              <Sprout className="h-7 w-7" />
+            </div>
             <div>
-              <p className="text-xs font-bold text-stone-800">少しずつで、<br />確実に上達しています！</p>
-              <p className="mt-1 text-[11px] leading-snug text-stone-500">このまま、自分のペースでがんばりましょう。</p>
+              <p className="text-sm font-bold whitespace-pre-line text-stone-800 leading-snug">
+                {stats.title}
+              </p>
+              <p className="mt-1 text-xs text-stone-500 leading-relaxed">
+                {stats.subtitle}
+              </p>
             </div>
           </div>
 
         </div>
       </div>
 
-      {/* 4. 練習の流れ（3ステップに整理） */}
+      {/* 4. 練習の流れ */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-bold text-emerald-200">
           <Sparkles className="h-4 w-4 text-emerald-300" />
@@ -142,7 +186,6 @@ export function HomeDashboard() {
         <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-md sm:p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             
-            {/* ① 写真を撮る */}
             <Link
               href="/practice/new"
               className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
@@ -153,7 +196,6 @@ export function HomeDashboard() {
               <span className="text-sm font-bold text-stone-700">写真を撮る</span>
             </Link>
 
-            {/* ② 診断を見る */}
             <Link
               href="/album"
               className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
@@ -164,7 +206,6 @@ export function HomeDashboard() {
               <span className="text-sm font-bold text-stone-700">診断を見る</span>
             </Link>
 
-            {/* ③ 書き直して比べる */}
             <Link
               href="/album"
               className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50/80 px-4 py-3.5 transition-colors hover:border-emerald-200 hover:bg-emerald-50/60"
