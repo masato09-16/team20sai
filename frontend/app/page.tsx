@@ -1,5 +1,5 @@
-import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { redirect } from 'next/navigation';
 
-export default function HomePage() {
-  return <HomeDashboard />;
+export default function RootPage() {
+  redirect('/practice-preview');
 }
