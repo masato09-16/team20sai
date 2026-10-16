@@ -6,3 +6,4 @@ numpy
 opencv-python-headless
 mediapipe
 Pillow==11.0.0
+easyocr
