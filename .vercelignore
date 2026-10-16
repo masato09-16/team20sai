@@ -25,3 +25,14 @@ requirements-dev.txt
 requirements-ocr.txt
 Dockerfile
 docker-compose.yml
+*.pyi
+*.typed
+*.md
+*.rst
+*.txt
+!requirements.txt
+tests/
+test/
+__pycache__/
+*.dist-info/RECORD
+*.dist-info/INSTALLER
