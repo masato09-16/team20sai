@@ -10,7 +10,6 @@ import {
   ImagePlus,
   Loader2,
   Save,
-  ShieldCheck,
   Video,
   VideoOff,
   Folder,
@@ -91,7 +90,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
 
   // トリミング画面用
   const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
-  const [currentFilename, setCurrentFilename] = useState<string>("board.jpg");
+  const currentFilenameRef = useRef<string>("board.jpg");
 
   const [albumOptions, setAlbumOptions] = useState<string[]>(["未分類"]);
   const [selectedAlbum, setSelectedAlbum] = useState("未分類");
@@ -162,7 +161,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     }
     setError(null);
     stopCamera();
-    setCurrentFilename(file.name);
+    currentFilenameRef.current = file.name;
     setRawImageSrc(URL.createObjectURL(file));
   }, [stopCamera]);
 
@@ -202,7 +201,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   const captureFromCamera = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || !video.videoWidth) {
+    if (!video || !video.videoWidth) {
       setError("カメラ映像の準備ができていません。");
       return;
     }
@@ -211,35 +210,37 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
     const scale = Math.min(1, 1600 / Math.max(vw, vh));
     const tw = Math.max(1, Math.round(vw * scale));
     const th = Math.max(1, Math.round(vh * scale));
-    canvas.width = tw;
-    canvas.height = th;
-    const ctx = canvas.getContext("2d");
+
+    const targetCanvas = canvas ?? document.createElement("canvas");
+    targetCanvas.width = tw;
+    targetCanvas.height = th;
+    const ctx = targetCanvas.getContext("2d");
     if (!ctx) {
       setError("画像の変換に失敗しました。");
       return;
     }
     ctx.drawImage(video, 0, 0, tw, th);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.92));
+    const blob = await new Promise<Blob | null>((resolve) => targetCanvas.toBlob((b) => resolve(b), "image/jpeg", 0.92));
     if (!blob) {
       setError("画像の変換に失敗しました。");
       return;
     }
     setError(null);
     stopCamera();
-    setCurrentFilename("capture.jpg");
+    currentFilenameRef.current = "capture.jpg";
     setRawImageSrc(URL.createObjectURL(blob));
   }, [stopCamera]);
 
   const handleCropComplete = useCallback((croppedBlob: Blob) => {
     setPendingImage({
       blob: croppedBlob,
-      filename: currentFilename,
+      filename: currentFilenameRef.current,
       mimeType: "image/jpeg",
     });
     setPreview(URL.createObjectURL(croppedBlob));
     if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
     setRawImageSrc(null);
-  }, [currentFilename, rawImageSrc, setPreview]);
+  }, [rawImageSrc, setPreview]);
 
   const handleCropCancel = useCallback(() => {
     if (rawImageSrc) URL.revokeObjectURL(rawImageSrc);
@@ -259,7 +260,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
       const existingSession = initialSessionId ? await getSession(initialSessionId) : null;
       let sessionId: string;
       let attempt: PracticeAttempt;
-      
+
       if (existingSession) {
         await updateSessionMemo(existingSession.id, memo || null);
         await updateSessionAlbumName(existingSession.id, selectedAlbum);
@@ -311,33 +312,18 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
   return (
     <section className="space-y-5 text-white">
       <PracticeSteps current={1} />
-      
-      {/* 見出しと説明文（白文字・明るいエメラルドに変更） */}
+
+      {/* 見出しと説明文 */}
       <header className="space-y-1">
         <h1 className="text-2xl font-bold text-white drop-shadow-sm">
           {hasSelectedImage ? "この写真で診断しますか？" : "黒板写真を1枚用意する"}
         </h1>
         <p className="text-sm text-emerald-100/90 leading-relaxed">
-          {hasSelectedImage ? "写真を確認して、診断結果へ進みましょう。" : "登録なしで診断できます。まずは黒板全体が入った写真を撮るか選んでください。"}
+          {hasSelectedImage ? "写真を確認して、診断結果へ進みましょう。" : "まずは黒板全体が入った写真を撮るか選んでください。"}
         </p>
       </header>
 
-      {!pendingImage ? (
-        <div className="ui-card p-4 text-stone-800">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-            <ShieldCheck className="h-4 w-4 text-teal-700" />
-            きれいに診断するコツ
-          </h2>
-          <ul className="mt-3 grid grid-cols-1 gap-2 text-sm text-stone-700 sm:grid-cols-2">
-            <li className="ui-card-compact px-3 py-2">黒板全体を枠内に入れる</li>
-            <li className="ui-card-compact px-3 py-2">できるだけ正面から撮る</li>
-            <li className="ui-card-compact px-3 py-2">暗さ・反射・ピンぼけを避ける</li>
-            <li className="ui-card-compact px-3 py-2">人名・顔・学校名が写らないか確認</li>
-          </ul>
-        </div>
-      ) : null}
-
-      <div className="ui-card space-y-3 p-4 text-stone-800">
+      <div className="ui-card space-y-4 p-4 text-stone-800">
         <input
           ref={fileInputRef}
           type="file"
@@ -347,6 +333,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
         />
         <canvas ref={canvasRef} className="hidden" />
 
+        {/* プレビュー / カメラ映像 */}
         <div className="relative min-h-[220px] overflow-hidden rounded-lg border border-stone-300 bg-black">
           <video
             ref={videoRef}
@@ -366,6 +353,7 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           ) : null}
         </div>
 
+        {/* 写真選択前：カメラ起動 / 写真選択 ボタン */}
         {!pendingImage ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
@@ -399,16 +387,115 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
           </div>
         ) : null}
 
+        {/* 写真確定後エリア */}
         {pendingImage ? (
-          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-stone-700">
-            <p className="font-medium text-amber-900">保存前の確認</p>
-            <p>児童生徒の氏名、顔、学校名など保存したくない情報が写っていないか確認してください。</p>
-          </div>
-        ) : null}
+          <div className="space-y-4">
+            {/* 保存前の確認 注意書き */}
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-stone-700">
+              <p className="font-medium text-amber-900">保存前の確認</p>
+              <p>児童生徒の氏名、顔、学校名など保存したくない情報が写っていないか確認してください。</p>
+            </div>
 
-        {pendingImage ? (
-          <div className="space-y-3">
-            <div className="ui-card-compact space-y-3 p-3">
+            {/* ① 保存先のアルバムを選ぶ */}
+            <details className="rounded-xl border border-stone-200 bg-stone-50/80 p-4 sm:p-5 text-stone-800 shadow-sm transition-all">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 text-base font-semibold text-stone-800 py-1 select-none">
+                <span className="flex items-center gap-2.5">
+                  <Folder className="h-5 w-5 text-teal-700" />
+                  保存先アルバムを選ぶ
+                </span>
+                <ChevronDown className="h-5 w-5 text-stone-500 transition-transform duration-200" />
+              </summary>
+              <div className="mt-4 space-y-4 pt-2 border-t border-stone-200/80">
+                <label htmlFor="album-select" className="block text-sm font-medium text-stone-700">
+                  今回の保存先
+                </label>
+                <select
+                  id="album-select"
+                  value={selectedAlbum}
+                  onChange={(e) => setSelectedAlbum(e.target.value)}
+                  className="ui-input w-full px-3.5 py-3 text-sm rounded-lg"
+                  disabled={isBusy}
+                >
+                  {albumOptions.map((album) => (
+                    <option key={album} value={album}>{album}</option>
+                  ))}
+                </select>
+
+                <form onSubmit={handleCreateAlbum} className="space-y-3 border-t border-stone-200 pt-3">
+                  <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-stone-700">
+                    <FolderPlus className="h-4 w-4 text-teal-700" />
+                    新しいアルバムを作成
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="new-album-input"
+                      type="text"
+                      value={newAlbumName}
+                      onChange={(e) => setNewAlbumName(e.target.value)}
+                      placeholder="例：教育実習、テスト対策など"
+                      className="ui-input min-w-0 flex-1 px-3.5 py-2.5 text-sm placeholder:text-stone-400 rounded-lg"
+                      disabled={isBusy}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newAlbumName.trim() || isBusy}
+                      className="ui-button-primary min-h-11 px-4 py-2 rounded-lg"
+                    >
+                      作成
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </details>
+
+            {/* ② 板書の内容メモ */}
+            <div className="space-y-1.5">
+              <label htmlFor="memo" className="block text-sm font-semibold text-stone-800">
+                板書の内容メモ（任意）
+              </label>
+              <textarea
+                id="memo"
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                rows={2}
+                className="ui-input w-full resize-y px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400"
+                placeholder="例：二次方程式の解の公式"
+                disabled={isBusy || isStartingCamera}
+              />
+            </div>
+
+            {/* 診断実行ボタン & 撮り直し/選び直し */}
+            <button
+              type="button"
+              onClick={saveAndAnalyze}
+              disabled={isBusy || isStartingCamera}
+              className="ui-button-primary min-h-[3.2rem] w-full py-3 text-base"
+            >
+              {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+              この写真で診断する
+            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={resetPendingOnly}
+                disabled={isBusy || isStartingCamera}
+                className="ui-button-quiet min-h-10 px-3 py-2"
+              >
+                撮り直す
+              </button>
+              <button
+                type="button"
+                onClick={onPickFile}
+                disabled={isBusy || isStartingCamera}
+                className="ui-button-quiet min-h-10 px-3 py-2"
+              >
+                別の写真を選ぶ
+              </button>
+            </div>
+            <p className="text-xs text-stone-500">写真と診断結果は、このブラウザの練習記録に保存されます。</p>
+
+            {/* ③ 採点条件（一番下へ移動） */}
+            <div className="ui-card-compact space-y-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
               <div>
                 <p className="text-sm font-semibold text-stone-800">採点条件</p>
                 <p className="mt-1 text-xs leading-5 text-stone-500">迷ったらこのままで大丈夫です。用途に合わせると総合点の重みが変わります。</p>
@@ -446,104 +533,9 @@ export function PracticeNewScreen({ initialSessionId }: { initialSessionId?: str
                 </label>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={saveAndAnalyze}
-              disabled={isBusy || isStartingCamera}
-              className="ui-button-primary min-h-[3.2rem] w-full py-3 text-base"
-            >
-              {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-              この写真で診断する
-            </button>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={resetPendingOnly}
-                disabled={isBusy || isStartingCamera}
-                className="ui-button-quiet min-h-10 px-3 py-2"
-              >
-                撮り直す
-              </button>
-              <button
-                type="button"
-                onClick={onPickFile}
-                disabled={isBusy || isStartingCamera}
-                className="ui-button-quiet min-h-10 px-3 py-2"
-              >
-                別の写真を選ぶ
-              </button>
-            </div>
-            <p className="text-xs text-stone-500">写真と診断結果は、このブラウザの練習記録に保存されます。</p>
           </div>
         ) : null}
       </div>
-
-      {/* 板書の内容メモ（ラベルを明るいエメラルド色に変更） */}
-      <div className="space-y-2">
-        <label htmlFor="memo" className="block text-sm font-bold text-emerald-200">
-          板書の内容メモ（任意）
-        </label>
-        <textarea
-          id="memo"
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          rows={2}
-          className="ui-input w-full resize-y px-3 py-2 text-sm placeholder:text-stone-400 text-stone-800"
-          placeholder="例：二次方程式の解の公式"
-          disabled={isBusy || isStartingCamera}
-        />
-      </div>
-
-      <details className="ui-card p-4 text-stone-800">
-        <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold text-stone-800">
-          <span className="flex items-center gap-2">
-            <Folder className="h-4 w-4 text-teal-700" />
-            保存先アルバムを選ぶ
-          </span>
-          <ChevronDown className="h-4 w-4 text-stone-500" />
-        </summary>
-        <div className="mt-3 space-y-4">
-          <label htmlFor="album-select" className="block text-sm font-medium text-stone-700">
-            今回の保存先
-          </label>
-          <select
-            id="album-select"
-            value={selectedAlbum}
-            onChange={(e) => setSelectedAlbum(e.target.value)}
-            className="ui-input w-full px-3 py-2.5 text-sm"
-            disabled={isBusy}
-          >
-            {albumOptions.map((album) => (
-              <option key={album} value={album}>{album}</option>
-            ))}
-          </select>
-
-          <form onSubmit={handleCreateAlbum} className="space-y-2 border-t border-stone-200 pt-3">
-            <label htmlFor="new-album-input" className="flex items-center gap-2 text-sm font-medium text-stone-700">
-              <FolderPlus className="h-4 w-4 text-teal-700" />
-              新しいアルバムを作成
-            </label>
-            <div className="flex gap-2">
-              <input
-                id="new-album-input"
-                type="text"
-                value={newAlbumName}
-                onChange={(e) => setNewAlbumName(e.target.value)}
-                placeholder="例：教育実習、テスト対策など"
-                className="ui-input min-w-0 flex-1 px-3 py-2 text-sm placeholder:text-stone-400"
-                disabled={isBusy}
-              />
-              <button
-                type="submit"
-                disabled={!newAlbumName.trim() || isBusy}
-                className="ui-button-primary min-h-10 px-4 py-2"
-              >
-                作成
-              </button>
-            </div>
-          </form>
-        </div>
-      </details>
 
       {permissionDenied ? (
         <p className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">

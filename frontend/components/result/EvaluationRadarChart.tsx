@@ -5,34 +5,28 @@ import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Responsi
 
 interface EvaluationRadarChartProps {
   scores?: {
-    readability: number;
-    line_alignment: number;
-    spacing_balance: number;
-    stroke_quality: number;
-    horizontalness: number;
-    visibility: number;
+    legibility: number;       // 見やすさ
+    stability: number;        // 文字と行の安定
+    organization: number;     // まとまり
+    spacing_and_margin: number; // 余白と干渉
   };
 }
 
 export default function EvaluationRadarChart({ scores }: EvaluationRadarChartProps) {
   const defaultScores = {
-    readability: 74,
-    line_alignment: 81,
-    spacing_balance: 80,
-    stroke_quality: 39,
-    horizontalness: 87,
-    visibility: 100,
+    legibility: 86,
+    stability: 43,
+    organization: 60,
+    spacing_and_margin: 75,
   };
 
   const currentScores = scores || defaultScores;
 
   const data = [
-    { subject: '読みやすさ', score: currentScores.readability, fullMark: 100 },
-    { subject: '行の揃い方', score: currentScores.line_alignment, fullMark: 100 },
-    { subject: '間隔の見やすさ', score: currentScores.spacing_balance, fullMark: 100 },
-    { subject: '文字の整い', score: currentScores.stroke_quality, fullMark: 100 },
-    { subject: '線の安定感', score: currentScores.horizontalness, fullMark: 100 },
-    { subject: '撮影品質', score: currentScores.visibility, fullMark: 100 },
+    { subject: '見やすさ', score: currentScores.legibility, fullMark: 100 },
+    { subject: '文字と行の安定', score: currentScores.stability, fullMark: 100 },
+    { subject: 'まとまり', score: currentScores.organization, fullMark: 100 },
+    { subject: '余白と干渉', score: currentScores.spacing_and_margin, fullMark: 100 },
   ];
 
   return (
@@ -45,7 +39,7 @@ export default function EvaluationRadarChart({ scores }: EvaluationRadarChartPro
             tick={{ fill: '#4a5568', fontSize: 12, fontWeight: '600' }} 
           />
           <PolarRadiusAxis 
-            angle={30} 
+            angle={45} 
             domain={[0, 100]} 
             tickCount={6} 
             stroke="#cbd5e1" 

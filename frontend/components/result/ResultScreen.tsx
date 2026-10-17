@@ -7,13 +7,10 @@ import { AlertCircle, ArrowRightLeft, Award, Clock3, Lightbulb, Loader2, Refresh
 
 import { analyzeBoardImage } from "@/lib/api/analyze";
 import { PracticeSteps } from "@/components/practice/PracticeSteps";
-import { ReferenceOverlayPanel } from "@/components/result/ReferenceOverlayPanel";
 import { DetailPageSkeleton } from "@/components/ui/PageSkeletons";
 import {
-  captureAndRecognitionHints,
   BOARD_TYPE_LABELS,
   compareMessages,
-  displayScoreItems,
   fixedRuleScoreItems,
   improvementHints,
   positiveHighlights,
@@ -45,7 +42,6 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
   const [attempt, setAttempt] = useState<PracticeAttempt | null>(null);
   const [allAttempts, setAllAttempts] = useState<PracticeAttempt[]>([]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [correctedText, setCorrectedText] = useState("");
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,7 +60,6 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
       setSession(s);
       setAttempt(a);
       setAllAttempts(list);
-      setCorrectedText(a?.correctedText || a?.analysisResult?.recognized_text || "");
       if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
       if (a?.imageBlob) {
         const url = URL.createObjectURL(a.imageBlob);
@@ -92,7 +87,6 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
   const score = result ? resultDisplayScore(result) : null;
   const positives = result ? positiveHighlights(result) : [];
   const hints = result ? improvementHints(result) : [];
-  const captureHints = result ? captureAndRecognitionHints(result) : [];
   const diagnosis = result ? diagnosisForResult(result) : null;
   const practiceMenu = result ? practiceMenuForResult(result) : null;
   const beforeAttempt = useMemo(() => {
@@ -105,26 +99,22 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
       : [];
   const comparableCount = allAttempts.filter((a) => a.analysisStatus === "completed" && a.analysisResult).length;
   const canCompare = comparableCount >= 2;
-  const referenceText = correctedText.trim() || result?.recognized_text?.trim() || "";
-  const writingDirection = result?.scoring?.writing_direction ?? "horizontal";
 
   const rerunAnalysis = useCallback(
-    async (withCorrection: boolean) => {
+    async () => {
       if (!attempt) return;
       setError(null);
       setWorking(true);
       try {
         await setAttemptAnalyzing(attempt.id);
-        const corrected = withCorrection ? correctedText.trim() : undefined;
         const data = await analyzeBoardImage(attempt.imageBlob, attempt.originalFilename ?? "saved.jpg", {
-          correctedText: corrected,
           boardType: attempt.analysisResult?.scoring?.board_type ?? "lecture",
           writingDirection: attempt.analysisResult?.scoring?.writing_direction ?? "horizontal",
         });
         await setAttemptCompleted({
           attemptId: attempt.id,
           result: data,
-          correctedText: corrected || null,
+          correctedText: null,
         });
         await load();
       } catch (e) {
@@ -136,7 +126,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
         setWorking(false);
       }
     },
-    [attempt, correctedText, load],
+    [attempt, load],
   );
 
   const onDeleteAttempt = useCallback(async () => {
@@ -206,7 +196,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => void rerunAnalysis(false)}
+              onClick={() => void rerunAnalysis()}
               disabled={working}
               className="ui-button-primary"
             >
@@ -224,7 +214,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
       ) : null}
 
       {result ? (
-        <div className="ui-card space-y-4 p-4">
+        <div className="ui-card space-y-4 p-4 text-stone-800">
           {diagnosis ? (
             <div className="space-y-2 rounded-lg border border-teal-200 bg-teal-50 p-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-teal-950">
@@ -237,11 +227,58 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
             </div>
           ) : null}
 
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <p className="text-sm text-stone-600">黒板での伝わりやすさ（今回の読みやすさ）</p>
-            <p className="text-3xl font-bold text-teal-700">{score}点</p>
-          </div>
+          {/* 診断評価スコア（旧：固定ルール採点を統合・整理） */}
+          {result.scoring ? (
+            <div className="space-y-3 rounded-xl border border-teal-200 bg-teal-50/70 p-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h4 className="text-base font-bold text-teal-950">診断評価スコア</h4>
+                  <p className="mt-1 text-xs text-stone-600">
+                    {BOARD_TYPE_LABELS[result.scoring.board_type]} /{" "}
+                    {WRITING_DIRECTION_LABELS[result.scoring.writing_direction]} / 信頼度
+                    {Math.round(result.scoring.confidence * 100)}%
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-stone-500 block">総合点</span>
+                  <p className="font-mono text-3xl font-bold text-teal-800">{result.scoring.display_score}点</p>
+                </div>
+              </div>
 
+              {/* 4つの評価指標カード */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {fixedRuleScoreItems(result.scoring).map((item) => (
+                  <div key={item.key} className="rounded-lg border border-teal-100 bg-white px-3 py-2.5 shadow-sm">
+                    <p className="text-xs font-medium text-stone-500">{item.label}</p>
+                    <p className="font-mono text-xl font-bold text-teal-900 mt-0.5">{Math.round(item.value * 100)}%</p>
+                  </div>
+                ))}
+              </div>
+
+              {result.scoring.caps.length > 0 ? (
+                <p className="rounded-md bg-white px-3 py-2 text-xs text-stone-600 border border-teal-100">
+                  低視認性・文字の小ささ・ブロック重なりのいずれかにより、総合点に上限をかけています。
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <p className="text-sm text-stone-600">黒板での伝わりやすさ（今回の読みやすさ）</p>
+              <p className="text-3xl font-bold text-teal-700">{score}点</p>
+            </div>
+          )}
+
+         {/* レーダーチャート */}
+          <div className="my-2 flex justify-center bg-stone-50 rounded-xl border border-stone-200 p-2">
+            <EvaluationRadarChart 
+              scores={{
+                legibility: Math.round((result.scoring?.axes?.visibility ?? 0) * 100),
+                stability: Math.round((result.scoring?.axes?.stability ?? 0) * 100),
+                organization: Math.round((result.scoring?.axes?.block_organization ?? 0) * 100),
+                spacing_and_margin: Math.round((result.scoring?.axes?.margin_interference ?? 0) * 100),
+              }} 
+            />
+          </div>
           <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
             <h2 className="text-sm font-semibold text-emerald-900">よかったところ</h2>
             <ul className="list-inside list-disc space-y-1 text-sm text-stone-700">
@@ -294,7 +331,7 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 pt-2">
             <Link
               href={`/practice/new?sessionId=${session.id}`}
               className="ui-button-primary"
@@ -311,98 +348,6 @@ export function ResultScreen({ sessionId, attemptId }: { sessionId: string; atte
               </Link>
             ) : null}
           </div>
-
-          <h3 className="text-sm font-semibold text-stone-700">詳しい評価</h3>
-
-          {result.scoring ? (
-            <div className="space-y-3 rounded-lg border border-teal-200 bg-teal-50 p-4">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h4 className="text-sm font-semibold text-teal-950">固定ルール採点</h4>
-                  <p className="mt-1 text-xs text-stone-600">
-                    {BOARD_TYPE_LABELS[result.scoring.board_type]} /{" "}
-                    {WRITING_DIRECTION_LABELS[result.scoring.writing_direction]} / 信頼度
-                    {Math.round(result.scoring.confidence * 100)}%
-                  </p>
-                </div>
-                <p className="font-mono text-2xl font-bold text-teal-800">{result.scoring.display_score}点</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {fixedRuleScoreItems(result.scoring).map((item) => (
-                  <div key={item.key} className="rounded-md border border-teal-100 bg-white px-3 py-2">
-                    <p className="text-[11px] font-medium text-stone-500">{item.label}</p>
-                    <p className="font-mono text-xl text-stone-800">{Math.round(item.value * 100)}%</p>
-                  </div>
-                ))}
-              </div>
-              {result.scoring.caps.length > 0 ? (
-                <p className="rounded-md bg-white px-3 py-2 text-xs text-stone-600">
-                  低視認性・文字の小ささ・ブロック重なりのいずれかにより、総合点に上限をかけています。
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          
-          <div className="mt-2 mb-4 flex justify-center bg-stone-50 rounded-xl border border-stone-100 p-2">
-            <EvaluationRadarChart 
-              scores={{
-                readability: Math.round((result.scores.readability || 0) * 100),
-                line_alignment: Math.round((result.scores.line_alignment || 0) * 100),
-                spacing_balance: Math.round((result.scores.spacing_balance || 0) * 100),
-                stroke_quality: Math.round((result.scores.stroke_quality || 0) * 100),
-                horizontalness: Math.round((result.scores.horizontalness || 0) * 100),
-                visibility: Math.round((result.scores.visibility || 0) * 100),
-              }} 
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {displayScoreItems(result.scores).map((item) => (
-              <div key={item.key} className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
-                <p className="text-[11px] font-medium text-stone-500">{item.label}</p>
-                <p className="font-mono text-xl text-stone-800">{Math.round(item.value * 100)}%</p>
-              </div>
-            ))}
-            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
-              <p className="text-[11px] font-medium text-stone-500">撮影品質</p>
-              <p className="font-mono text-xl text-stone-800">{Math.round(result.scores.visibility * 100)}%</p>
-            </div>
-          </div>
-
-          <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
-            <h3 className="text-sm font-semibold text-sky-900">お手本に使う文字</h3>
-            <p className="text-xs text-stone-500">
-              OCR 結果が違う場合は修正して確認し直せます。主評価は文字の見やすさです。
-            </p>
-            <textarea
-              value={correctedText}
-              onChange={(e) => setCorrectedText(e.target.value)}
-              rows={3}
-              className="ui-input w-full resize-y px-3 py-2 text-sm"
-              placeholder="認識結果が違う場合はここで修正"
-              disabled={working}
-            />
-            <button
-              type="button"
-              onClick={() => void rerunAnalysis(true)}
-              disabled={working || !correctedText.trim()}
-              className="ui-button-primary min-h-10 px-3 py-2"
-            >
-              {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              修正して確認し直す
-            </button>
-          </div>
-
-          {captureHints.length > 0 ? (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-              <h3 className="text-sm font-semibold text-orange-900">撮影・認識の確認</h3>
-              <ul className="mt-1 list-inside list-disc space-y-1 text-sm text-stone-700">
-                {captureHints.map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </div>
       ) : null}
 

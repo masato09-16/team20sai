@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, Camera, ImagePlus, Trash2 } from "lucide-react";
+import { Camera, ImagePlus, Trash2 } from "lucide-react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DetailPageSkeleton } from "@/components/ui/PageSkeletons";
@@ -139,9 +139,6 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
     }
   }, [memo, sessionId]);
 
-  const comparableAttempts = attempts.filter((attempt) => attempt.analysisStatus === "completed" && attempt.analysisResult);
-  const canCompare = comparableAttempts.length >= 2;
-
   if (loading) return <DetailPageSkeleton />;
   if (error && !session) {
     return (
@@ -167,9 +164,9 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-  <h1 className="text-2xl font-bold text-white drop-shadow-sm">練習の記録</h1>
-  <p className="text-sm font-medium text-emerald-100/90">{formatDateTime(session.createdAt)}</p>
-</header>
+        <h1 className="text-2xl font-bold text-white drop-shadow-sm">練習の記録</h1>
+        <p className="text-sm font-medium text-emerald-100/90">{formatDateTime(session.createdAt)}</p>
+      </header>
       {error ? (
         <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">{error}</p>
       ) : null}
@@ -189,31 +186,19 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      {/* アクションボタン（2カラム配置に整理） */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Link
           href={`/practice/new?sessionId=${session.id}`}
-          className="ui-button-primary"
+          className="ui-button-primary min-h-11 flex items-center justify-center gap-2"
         >
           <Camera className="h-4 w-4" />
           同じ内容でもう一度練習する
         </Link>
-        {canCompare ? (
-          <Link
-            href={`/practice/${session.id}/compare`}
-            className="ui-button-secondary"
-          >
-            <ArrowRightLeft className="h-4 w-4" />
-            書き直しを比較する
-          </Link>
-        ) : (
-          <div className="inline-flex min-h-11 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 px-4 py-2 text-sm text-stone-500">
-            比較には解析完了した写真が2枚以上必要です
-          </div>
-        )}
         <button
           type="button"
           onClick={() => void onDeleteSession()}
-          className="ui-button-danger"
+          className="ui-button-danger min-h-11 flex items-center justify-center gap-2"
         >
           <Trash2 className="h-4 w-4" />
           練習を削除

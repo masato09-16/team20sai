@@ -37,16 +37,33 @@ function SessionCard({ row }: { row: Row }) {
       ? `${resultDisplayScore(latest.analysisResult)}点`
       : latest?.analysisStatus === "error" ? "解析エラー" : "解析待ち";
 
+  const hasMemo = Boolean(row.session.memo?.trim());
+
   return (
-    <Link href={`/album/${row.session.id}`} className="ui-link-card block p-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-stone-800">{row.session.memo?.trim() || "メモ未入力の練習"}</p>
-          <p className="text-xs text-stone-500">{formatDateTime(row.session.updatedAt)}</p>
-          <span className="mt-1 inline-block rounded-full bg-teal-50 px-2 py-0.5 text-[10px] text-teal-800">{row.albumName}</span>
+    <Link href={`/album/${row.session.id}`} className="ui-link-card block p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          {/* 1行目: 日時 と アルバム名 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-stone-500">
+              {formatDateTime(row.session.updatedAt)}
+            </span>
+            <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-800 border border-teal-200/70">
+              {row.albumName}
+            </span>
+          </div>
+
+          {/* 2行目: メモ（入力されている場合のみ表示） */}
+          {hasMemo ? (
+            <p className="truncate text-sm font-semibold text-stone-800">
+              {row.session.memo}
+            </p>
+          ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-teal-700">{score}</span>
+
+        {/* 右側: スコアと矢印 */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-sm font-bold text-teal-700">{score}</span>
           <ChevronRight className="h-4 w-4 text-stone-400" />
         </div>
       </div>

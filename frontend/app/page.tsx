@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+import { HomeDashboard } from "@/components/home/HomeDashboard";
 
 export default function RootPage() {
-  // メインの新規練習画面へ転送
-  redirect("/practice/new");
+  return <HomeDashboard />;
 }
